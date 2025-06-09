@@ -97,6 +97,7 @@ docker-compose logs -f
 애플리케이션 실행 후 다음 URL에서 API 문서를 확인할 수 있습니다:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+- 추가적인 엔드포인트 설명은 [docs/API.md](docs/API.md) 파일을 참고하세요.
 
 ## 🔧 개발 환경
 
