@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 데이터베이스
+  db:
+    image: postgres:14-alpine
+    container_name: webhoster_db
+    environment:
+      POSTGRES_DB: webhoster_db
+      POSTGRES_USER: webhoster_user
+      POSTGRES_PASSWORD: webhoster_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - webhoster_network
+
+  # 백엔드 API 서버
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: webhoster_backend
+    environment:
+      - DATABASE_URL=postgresql://webhoster_user:webhoster_pass@db:5432/webhoster_db
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+    volumes:
+      - ./backend:/app
+      - /var/run/libvirt:/var/run/libvirt
+      - /var/lib/libvirt:/var/lib/libvirt
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    networks:
+      - webhoster_network
+    privileged: true  # VM 관리를 위해 필요
+
+  # Nginx 리버스 프록시
+  nginx:
+    image: nginx:alpine
+    container_name: webhoster_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/sites:/etc/nginx/sites-available/hosting
+    ports:
+      - "80:80"
+      - "443:443"
+      - "10000-20000:10000-20000"  # SSH 포트 범위
+    depends_on:
+      - backend
+    networks:
+      - webhoster_network
+
+volumes:
+  postgres_data:
+
+networks:
+  webhoster_network:
+    driver: bridge 
