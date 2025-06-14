@@ -339,9 +339,14 @@ class ProxyService:
     
     def _test_and_reload_nginx(self) -> bool:
         """
-        Nginx 설정 테스트 및 리로드 (개선된 버전)
+        Nginx 설정 테스트 및 리로드 (개발 환경용 Mock 버전)
         """
         try:
+            # 개발 환경에서는 Mock으로 성공 반환
+            if settings.DEBUG:
+                logger.info("개발 환경: Mock Nginx 설정 테스트 및 리로드 성공")
+                return True
+            
             # 1. 설정 파일 문법 검사
             test_result = subprocess.run(
                 ["nginx", "-t"],

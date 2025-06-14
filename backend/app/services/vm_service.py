@@ -633,22 +633,22 @@ maxretry = 6
             template_path = self.image_path / self.template_image
             
             if template_path.exists():
-                # 템플릿에서 복사
+                # 템플릿에서 복사 (절대 경로 사용)
                 subprocess.run([
                     "qemu-img", "create", "-f", "qcow2",
-                    "-b", str(template_path),
+                    "-b", str(template_path.resolve()),  # 절대 경로로 변경
                     "-F", "qcow2",
-                    str(disk_path)
+                    str(disk_path.resolve())  # 절대 경로로 변경
                 ], check=True, timeout=60)
             else:
                 # 새 이미지 생성
                 subprocess.run([
                     "qemu-img", "create", "-f", "qcow2",
-                    str(disk_path), f"{size_gb}G"
+                    str(disk_path.resolve()), f"{size_gb}G"  # 절대 경로로 변경
                 ], check=True, timeout=60)
             
             logger.info(f"VM 디스크 생성 완료: {disk_path}")
-            return str(disk_path)
+            return str(disk_path.resolve())  # 절대 경로 반환
             
         except subprocess.CalledProcessError as e:
             logger.error(f"VM 디스크 생성 실패: {e}")
@@ -744,9 +744,23 @@ maxretry = 6
     
     def create_vm(self, vm_id: str, ssh_port: int, user_id: str = None) -> Dict[str, str]:
         """
-        VM 생성 및 시작 (웹서버 자동 설치 포함)
+        VM 생성 및 시작 (개발 환경용 Mock 버전)
         """
         try:
+            # 개발 환경에서는 실제 VM을 생성하지 않고 Mock 데이터 반환
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 생성 - {vm_id}")
+                
+                # Mock 데이터 반환
+                return {
+                    "vm_id": vm_id,
+                    "vm_ip": f"192.168.122.{100 + (hash(vm_id) % 50)}",  # Mock IP
+                    "disk_path": str(self.image_path / f"{vm_id}.qcow2"),
+                    "cloud_init_iso": None,
+                    "status": HostingStatus.RUNNING.value
+                }
+            
+            # 프로덕션 환경에서는 실제 VM 생성
             # 1. 디스크 이미지 생성
             disk_path = self.create_vm_disk(vm_id)
             
@@ -854,109 +868,131 @@ maxretry = 6
     
     def stop_vm(self, vm_id: str) -> bool:
         """
-        VM 중지
+        VM 중지 (개발 환경용 Mock 버전)
         """
         try:
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 중지 - {vm_id}")
+                return True
+                
             subprocess.run([
                 "virsh", "shutdown", vm_id
             ], check=True, timeout=30)
             
-            logger.info(f"VM 중지 요청: {vm_id}")
+            logger.info(f"VM 중지 완료: {vm_id}")
             return True
             
         except subprocess.CalledProcessError as e:
             logger.error(f"VM 중지 실패: {e}")
-            raise VMOperationError(f"VM 중지에 실패했습니다: {e}")
+            return False
     
     def start_vm(self, vm_id: str) -> bool:
         """
-        VM 시작
+        VM 시작 (개발 환경용 Mock 버전)
         """
         try:
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 시작 - {vm_id}")
+                return True
+                
             subprocess.run([
                 "virsh", "start", vm_id
             ], check=True, timeout=30)
             
-            logger.info(f"VM 시작: {vm_id}")
+            logger.info(f"VM 시작 완료: {vm_id}")
             return True
             
         except subprocess.CalledProcessError as e:
             logger.error(f"VM 시작 실패: {e}")
-            raise VMOperationError(f"VM 시작에 실패했습니다: {e}")
+            return False
     
     def restart_vm(self, vm_id: str) -> bool:
         """
-        VM 재시작
+        VM 재시작 (개발 환경용 Mock 버전)
         """
         try:
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 재시작 - {vm_id}")
+                return True
+                
             subprocess.run([
                 "virsh", "reboot", vm_id
             ], check=True, timeout=30)
             
-            logger.info(f"VM 재시작: {vm_id}")
+            logger.info(f"VM 재시작 완료: {vm_id}")
             return True
             
         except subprocess.CalledProcessError as e:
             logger.error(f"VM 재시작 실패: {e}")
-            raise VMOperationError(f"VM 재시작에 실패했습니다: {e}")
+            return False
     
     def delete_vm(self, vm_id: str) -> bool:
         """
-        VM 완전 삭제
+        VM 삭제 (개발 환경용 Mock 버전)
         """
         try:
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 삭제 - {vm_id}")
+                return True
+                
             # VM 중지
-            try:
-                subprocess.run([
-                    "virsh", "destroy", vm_id
-                ], timeout=30)
-            except subprocess.CalledProcessError:
-                pass  # 이미 중지된 경우 무시
+            subprocess.run([
+                "virsh", "destroy", vm_id
+            ], check=False)  # 이미 중지된 경우 무시
             
-            # VM 정의 제거
+            # VM 정의 삭제
             subprocess.run([
                 "virsh", "undefine", vm_id
             ], check=True, timeout=30)
-            
-            # 디스크 이미지 삭제
-            disk_path = self.image_path / f"{vm_id}.qcow2"
-            if disk_path.exists():
-                disk_path.unlink()
             
             logger.info(f"VM 삭제 완료: {vm_id}")
             return True
             
         except subprocess.CalledProcessError as e:
             logger.error(f"VM 삭제 실패: {e}")
-            raise VMOperationError(f"VM 삭제에 실패했습니다: {e}")
+            return False
     
     def cleanup_vm(self, vm_id: str) -> None:
         """
-        VM 정리 (오류 시 호출)
+        VM 정리 (파일 삭제 포함) (개발 환경용 Mock 버전)
         """
         try:
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 정리 - {vm_id}")
+                return
+                
+            # VM 삭제
             self.delete_vm(vm_id)
+            
+            # 디스크 파일 삭제
+            disk_path = self.image_path / f"{vm_id}.qcow2"
+            if disk_path.exists():
+                disk_path.unlink()
+                
         except Exception as e:
-            logger.error(f"VM 정리 중 오류: {e}")
+            logger.error(f"VM 정리 실패: {e}")
     
     def get_vm_status(self, vm_id: str) -> HostingStatus:
         """
-        VM 상태 조회
+        VM 상태 조회 (개발 환경용 Mock 버전)
         """
         try:
+            if settings.DEBUG:
+                logger.info(f"개발 환경: Mock VM 상태 조회 - {vm_id}")
+                return HostingStatus.RUNNING
+                
             result = subprocess.run([
                 "virsh", "domstate", vm_id
             ], capture_output=True, text=True, timeout=10)
             
             if result.returncode == 0:
                 state = result.stdout.strip().lower()
-                
                 if state == "running":
                     return HostingStatus.RUNNING
-                elif state in ["shut off", "shutoff"]:
+                elif state == "shut off":
                     return HostingStatus.STOPPED
                 elif state in ["paused", "suspended"]:
-                    return HostingStatus.STOPPING
+                    return HostingStatus.STOPPED
                 else:
                     return HostingStatus.ERROR
             else:
