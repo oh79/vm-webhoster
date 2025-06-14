@@ -5,16 +5,28 @@ services:
   db:
     image: postgres:14-alpine
     container_name: webhoster_db
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: webhoster_db
-      POSTGRES_USER: webhoster_user
-      POSTGRES_PASSWORD: webhoster_pass
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     ports:
-      - "5432:5432"
+      - "${BIND_ADDRESS}:5432:5432"
     networks:
       - webhoster_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
   # 백엔드 API 서버
   backend:
@@ -22,40 +34,147 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: webhoster_backend
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql://webhoster_user:webhoster_pass@db:5432/webhoster_db
-      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      # 환경변수들은 .env 파일에서 자동으로 로드됩니다
+      - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - VM_IMAGE_PATH=${VM_IMAGE_PATH}
+      - VM_BRIDGE_NAME=${VM_BRIDGE_NAME}
+      - VM_TEMPLATE_IMAGE=${VM_TEMPLATE_IMAGE}
+      - SSH_PORT_RANGE_START=${SSH_PORT_RANGE_START}
+      - SSH_PORT_RANGE_END=${SSH_PORT_RANGE_END}
+      - NGINX_CONFIG_PATH=${NGINX_CONFIG_PATH}
+      - SERVICE_DOMAIN=${SERVICE_DOMAIN}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - DEBUG=${DEBUG}
+      - PROJECT_NAME=${PROJECT_NAME}
+      - VERSION=${VERSION}
+      - DESCRIPTION=${DESCRIPTION}
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - REDIS_URL=${REDIS_URL}
     volumes:
-      - ./backend:/app
-      - /var/run/libvirt:/var/run/libvirt
-      - /var/lib/libvirt:/var/lib/libvirt
+      - ./backend:/app:ro
+      - vm_images:/app/vm-images
+      - nginx_configs:/app/nginx-configs
+      - cloud_init_data:/app/cloud-init
+      - webhoster_logs:/var/log/webhoster
     ports:
-      - "8000:8000"
+      - "${BIND_ADDRESS}:${API_PORT}:${API_PORT}"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - webhoster_network
-    privileged: true  # VM 관리를 위해 필요
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT}/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
   # Nginx 리버스 프록시
   nginx:
     image: nginx:alpine
     container_name: webhoster_nginx
+    env_file:
+      - .env
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/sites:/etc/nginx/sites-available/hosting
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx_configs:/etc/nginx/sites-available/hosting:ro
+      - nginx_logs:/var/log/nginx
+      - ./nginx/static:/usr/share/nginx/html/static:ro
     ports:
-      - "80:80"
-      - "443:443"
-      - "10000-20000:10000-20000"  # SSH 포트 범위
+      - "${BIND_ADDRESS}:80:80"
+      - "${BIND_ADDRESS}:443:443"
+      - "${BIND_ADDRESS}:${SSH_PORT_RANGE_START}-10010:${SSH_PORT_RANGE_START}-10010"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - webhoster_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
+  # Redis (캐싱 및 세션 저장용)
+  redis:
+    image: redis:7-alpine
+    container_name: webhoster_redis
+    env_file:
+      - .env
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${BIND_ADDRESS}:6379:6379"
+    networks:
+      - webhoster_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  # 프론트엔드 (개발용)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: webhoster_frontend
+    env_file:
+      - .env
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NODE_ENV=${NODE_ENV}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "${BIND_ADDRESS}:3000:3000"
+    networks:
+      - webhoster_network
+    restart: unless-stopped
+
+# 볼륨 정의
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  vm_images:
+    driver: local
+  nginx_configs:
+    driver: local
+  cloud_init_data:
+    driver: local
+  webhoster_logs:
+    driver: local
+  nginx_logs:
+    driver: local
 
+# 네트워크 정의
 networks:
   webhoster_network:
-    driver: bridge 
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET} 
