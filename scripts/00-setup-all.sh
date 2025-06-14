@@ -174,9 +174,6 @@ curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 log_info "Node.js 설치..."
 sudo apt install -y nodejs
 
-log_info "npm 업데이트..."
-sudo npm install -g npm@latest
-
 log_info "설치된 버전 확인:"
 echo "  - Node.js: $(node --version)"
 echo "  - npm: $(npm --version)"
