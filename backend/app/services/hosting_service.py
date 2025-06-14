@@ -61,12 +61,16 @@ class HostingService:
             created_resources['vm_id'] = vm_id
             
             # 사용 가능한 SSH 포트 찾기
-            ssh_port = self.vm_service.get_available_ssh_port()
+            ssh_port = self.vm_service.get_available_ssh_port(db_session=self.db)
             created_resources['ssh_port'] = ssh_port
+            
+            # 호스팅 이름 생성 (제공되지 않은 경우)
+            hosting_name = hosting_data.name if hosting_data.name else f"hosting-{vm_id[-8:]}"
             
             # 호스팅 레코드 생성 (상태: CREATING)
             hosting = Hosting(
                 user_id=user_id,
+                name=hosting_name,
                 vm_id=vm_id,
                 vm_ip="0.0.0.0",  # VM 생성 후 업데이트
                 ssh_port=ssh_port,

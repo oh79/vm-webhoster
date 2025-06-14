@@ -121,18 +121,37 @@ class VMService:
         """
         return f"vm-{uuid.uuid4().hex[:8]}"
     
-    def get_available_ssh_port(self, start_port: int = None, end_port: int = None) -> int:
+    def get_available_ssh_port(self, start_port: int = None, end_port: int = None, db_session = None) -> int:
         """
-        사용 가능한 SSH 포트 찾기 (개선된 버전)
+        사용 가능한 SSH 포트 찾기 (개선된 버전 - DB 확인 포함)
         """
+        from app.models.hosting import Hosting  # 순환 import 방지
+        
         start = start_port or settings.SSH_PORT_RANGE_START
         end = end_port or settings.SSH_PORT_RANGE_END
         
+        # 데이터베이스에서 사용 중인 포트 조회
+        used_ports = set()
+        if db_session:
+            try:
+                db_ports = db_session.query(Hosting.ssh_port).all()
+                used_ports = {port[0] for port in db_ports if port[0]}
+                logger.info(f"데이터베이스에서 사용 중인 SSH 포트: {used_ports}")
+            except Exception as e:
+                logger.warning(f"데이터베이스 포트 조회 실패: {e}")
+        
         for port in range(start, end + 1):
+            # 데이터베이스에서 사용 중인 포트인지 확인
+            if port in used_ports:
+                logger.debug(f"포트 {port}는 데이터베이스에서 사용 중")
+                continue
+                
+            # 시스템에서 사용 중인 포트인지 확인
             if self._is_port_available(port):
+                logger.info(f"사용 가능한 SSH 포트 찾음: {port}")
                 return port
         
-        raise VMOperationError(f"사용 가능한 SSH 포트가 없습니다. (범위: {start}-{end})")
+        raise VMOperationError(f"사용 가능한 SSH 포트가 없습니다. (범위: {start}-{end}, DB 사용 중: {len(used_ports)}개)")
     
     def _is_port_available(self, port: int) -> bool:
         """

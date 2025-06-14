@@ -1,35 +1,30 @@
 """
-호스팅 관련 API 엔드포인트
+호스팅 API 엔드포인트 - VM 기반 웹 호스팅 관리 (개선된 버전)
 """
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+import logging
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.hosting import HostingStatus
 from app.schemas.hosting import (
-    HostingCreate, 
-    HostingResponse, 
-    HostingDetail, 
-    HostingStats,
-    HostingOperation,
-    VMInfo
+    HostingCreate, HostingResponse, HostingDetail, HostingUpdate,
+    HostingOperation, HostingStats
 )
 from app.schemas.common import StandardResponse, PaginatedResponse
-from app.services.hosting_service import HostingService
-from app.core.dependencies import get_current_user_id
 from app.utils.response_utils import (
     create_success_response,
     create_paginated_response,
     validate_pagination_params,
     calculate_offset
 )
-from app.utils.logging_utils import log_request_info, get_logger
+from app.utils.logging_utils import get_logger, log_request_info
+from app.services.hosting_service import HostingService
+from app.core.dependencies import get_current_user_id
 from app.core.exceptions import (
-    HostingNotFoundError,
-    HostingAlreadyExistsError,
-    VMOperationError,
-    InsufficientPermissionError
+    HostingNotFoundError, HostingAlreadyExistsError,
+    VMOperationError, InsufficientPermissionError
 )
 
 # 라우터 설정
@@ -89,9 +84,9 @@ def create_hosting(
 
 @router.get(
     "/my",
-    response_model=StandardResponse[HostingResponse],
+    response_model=StandardResponse[Optional[HostingResponse]],
     summary="내 호스팅 조회",
-    description="현재 사용자의 호스팅을 조회합니다."
+    description="현재 사용자의 호스팅을 조회합니다. 호스팅이 없으면 null을 반환합니다."
 )
 def get_my_hosting(
     current_user_id: int = Depends(get_current_user_id),
@@ -101,7 +96,7 @@ def get_my_hosting(
     내 호스팅 조회
     
     현재 사용자의 호스팅을 조회합니다.
-    사용자당 1개의 호스팅만 가질 수 있습니다.
+    호스팅이 없는 경우 404 에러가 아닌 null을 반환합니다.
     """
     log_request_info("GET", "/hosting/my", user_id=current_user_id)
     
@@ -110,21 +105,24 @@ def get_my_hosting(
         hosting = hosting_service.get_hosting_by_user_id(current_user_id)
         
         if not hosting:
-            raise HostingNotFoundError("호스팅을 찾을 수 없습니다.")
+            logger.info(f"호스팅 없음: 사용자 {current_user_id}")
+            return create_success_response(
+                message="호스팅이 없습니다.",
+                data=None
+            )
+        
+        # 상태 동기화
+        hosting = hosting_service.sync_hosting_status(hosting.id)
+        
+        hosting_response = HostingResponse.model_validate(hosting)
         
         logger.info(f"내 호스팅 조회: 사용자 {current_user_id}, 호스팅 {hosting.id}")
         
         return create_success_response(
-            message="호스팅 정보를 조회했습니다.",
-            data=HostingResponse.model_validate(hosting)
+            message="호스팅을 조회했습니다.",
+            data=hosting_response
         )
         
-    except HostingNotFoundError as e:
-        logger.warning(f"내 호스팅 조회 실패: {e.detail}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=e.detail
-        )
     except Exception as e:
         logger.error(f"내 호스팅 조회 실패: {e}")
         raise HTTPException(

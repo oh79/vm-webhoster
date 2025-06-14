@@ -13,7 +13,7 @@ class HostingBase(BaseModel):
 
 class HostingCreate(HostingBase):
     """호스팅 생성 요청 (사용자는 자동으로 현재 로그인 사용자)"""
-    pass
+    name: Optional[str] = Field(None, description="호스팅 이름 (없을 경우 자동 생성)")
 
 class HostingUpdate(BaseModel):
     """호스팅 상태 업데이트"""
@@ -23,6 +23,7 @@ class HostingResponse(BaseModel):
     """호스팅 기본 응답"""
     id: int = Field(..., description="호스팅 ID")
     user_id: int = Field(..., description="사용자 ID")
+    name: str = Field(..., description="호스팅 이름")
     vm_id: str = Field(..., description="VM ID")
     vm_ip: str = Field(..., description="VM IP 주소")
     ssh_port: int = Field(..., description="SSH 포트")
