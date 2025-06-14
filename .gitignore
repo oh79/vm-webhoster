@@ -171,8 +171,3 @@ local_config.json
 # Frontend specific
 .eslintcache
 .stylelintcache
-
-# Package lock files for CI/CD consistency
-# (팀에서 결정하여 주석 해제)
-# package-lock.json
-# yarn.lock 
