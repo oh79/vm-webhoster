@@ -1,0 +1,76 @@
+# Prometheus 모니터링 설정 (PRD 99.9% 가용성 요구사항)
+
+global:
+  scrape_interval: 15s      # 15초마다 메트릭 수집
+  evaluation_interval: 15s  # 15초마다 규칙 평가
+  scrape_timeout: 10s
+
+# 알림 규칙 파일
+rule_files:
+  - "alert_rules.yml"
+
+# 알림 매니저 설정
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# 스크래핑 설정
+scrape_configs:
+  # Prometheus 자체 모니터링
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # 웹호스터 백엔드 API 모니터링
+  - job_name: 'webhoster-backend'
+    static_configs:
+      - targets: ['backend:8000']
+    metrics_path: /health
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # 데이터베이스 모니터링
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['db:5432']
+    scrape_interval: 30s
+
+  # Redis 모니터링
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+
+  # Nginx 모니터링
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:80']
+    scrape_interval: 30s
+
+  # 프론트엔드 모니터링
+  - job_name: 'frontend'
+    static_configs:
+      - targets: ['frontend:3000']
+    scrape_interval: 30s
+
+  # 시스템 리소스 모니터링 (Docker 호스트)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+
+# 데이터 저장 설정
+storage:
+  tsdb:
+    retention.time: 15d
+    retention.size: 10GB
+    path: /prometheus
+    wal-compression: true
+
+# 원격 쓰기 설정 (선택사항)
+# remote_write:
+#   - url: "https://remote-storage-endpoint/api/v1/write" 

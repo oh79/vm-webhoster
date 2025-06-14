@@ -36,7 +36,32 @@ class Settings(BaseSettings):
     # VM 관리 설정
     VM_BRIDGE_NAME: str = Field(default="virbr0", description="VM 브리지 네트워크 이름")
     VM_IMAGE_PATH: str = Field(default="/var/lib/libvirt/images", description="VM 이미지 저장 경로")
-    VM_TEMPLATE_IMAGE: str = Field(default="ubuntu-20.04-server-cloudimg-amd64.img", description="VM 템플릿 이미지")
+    VM_TEMPLATE_IMAGE: str = Field(default="ubuntu-22.04-server-cloudimg-amd64.img", description="VM 템플릿 이미지")
+    VM_DEFAULT_MEMORY: int = Field(default=1024, description="VM 기본 메모리 (MB)")
+    VM_DEFAULT_VCPUS: int = Field(default=1, description="VM 기본 vCPU 수")
+    VM_DEFAULT_DISK_SIZE: int = Field(default=20, description="VM 기본 디스크 크기 (GB)")
+    
+    # 보안 설정
+    SSH_KEY_SIZE: int = Field(default=2048, description="SSH 키 크기 (bits)")
+    SSH_KEY_TYPE: str = Field(default="rsa", description="SSH 키 타입")
+    ENABLE_SSH_PASSWORD_AUTH: bool = Field(default=False, description="SSH 패스워드 인증 허용")
+    
+    # 헬스체크 설정
+    HEALTH_CHECK_INTERVAL: int = Field(default=300, description="헬스체크 간격 (초)")
+    HEALTH_CHECK_TIMEOUT: int = Field(default=30, description="헬스체크 타임아웃 (초)")
+    ENABLE_AUTO_RECOVERY: bool = Field(default=True, description="자동 복구 활성화")
+    
+    # 네트워크 설정
+    NETWORK_TIMEOUT: int = Field(default=30, description="네트워크 연결 타임아웃 (초)")
+    MAX_CONCURRENT_VMS: int = Field(default=10, description="최대 동시 VM 수")
+    
+    # 백업 설정
+    ENABLE_CONFIG_BACKUP: bool = Field(default=True, description="설정 백업 활성화")
+    BACKUP_RETENTION_DAYS: int = Field(default=7, description="백업 보관 일수")
+    
+    # 로깅 설정 확장
+    ENABLE_VM_LOGGING: bool = Field(default=True, description="VM 생성/삭제 로깅 활성화")
+    ENABLE_SECURITY_LOGGING: bool = Field(default=True, description="보안 이벤트 로깅 활성화")
     
     # 서비스 도메인 설정
     SERVICE_DOMAIN: str = Field(default="localhost:8000", description="서비스 도메인")

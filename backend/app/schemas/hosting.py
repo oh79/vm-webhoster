@@ -1,7 +1,7 @@
 """
 호스팅 관련 Pydantic 스키마
 """
-from typing import Optional
+from typing import Optional, List, Union, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 from app.models.hosting import HostingStatus
@@ -53,11 +53,50 @@ class HostingDetail(HostingResponse):
         return v
 
 class HostingStats(BaseModel):
-    """호스팅 통계"""
+    """호스팅 통계 (개선된 버전)"""
     total_hostings: int = Field(..., description="전체 호스팅 수")
     active_hostings: int = Field(..., description="활성 호스팅 수")
     creating_hostings: int = Field(..., description="생성 중인 호스팅 수")
-    error_hostings: int = Field(..., description="에러 상태 호스팅 수")
+    stopped_hostings: int = Field(..., description="중지된 호스팅 수")
+    error_hostings: int = Field(..., description="오류 상태 호스팅 수")
+    recent_hostings: int = Field(..., description="최근 24시간 생성된 호스팅 수")
+    active_ratio: float = Field(..., description="활성 호스팅 비율 (%)")
+
+class HostingHealth(BaseModel):
+    """호스팅 헬스체크 결과"""
+    hosting_id: int = Field(..., description="호스팅 ID")
+    vm_id: str = Field(..., description="VM ID")
+    vm_status: str = Field(..., description="VM 상태")
+    web_accessible: bool = Field(..., description="웹 접근 가능 여부")
+    ssh_accessible: bool = Field(..., description="SSH 접근 가능 여부")
+    last_check: str = Field(..., description="마지막 확인 시간")
+    issues: List[str] = Field(default=[], description="발견된 문제점 목록")
+
+class SSHInfo(BaseModel):
+    """SSH 접속 정보"""
+    vm_id: str = Field(..., description="VM ID")
+    vm_ip: str = Field(..., description="VM IP 주소")
+    ssh_port: str = Field(..., description="SSH 포트")
+    username: str = Field(..., description="기본 사용자명")
+    alternative_username: str = Field(..., description="대체 사용자명")
+    ssh_command: str = Field(..., description="SSH 접속 명령어")
+    ssh_command_alt: str = Field(..., description="대체 SSH 접속 명령어")
+    private_key: Optional[str] = Field(None, description="SSH 개인키")
+    public_key: Optional[str] = Field(None, description="SSH 공개키")
+
+class DetailedHostingInfo(BaseModel):
+    """상세 호스팅 정보"""
+    id: int = Field(..., description="호스팅 ID")
+    user_id: int = Field(..., description="사용자 ID")
+    vm_id: str = Field(..., description="VM ID")
+    vm_ip: str = Field(..., description="VM IP 주소")
+    ssh_port: int = Field(..., description="SSH 포트")
+    status: str = Field(..., description="호스팅 상태")
+    created_at: Optional[str] = Field(None, description="생성 시간")
+    updated_at: Optional[str] = Field(None, description="수정 시간")
+    web_url: str = Field(..., description="웹 접속 URL")
+    ssh_command: str = Field(..., description="SSH 접속 명령어")
+    health: Optional[Union[HostingHealth, Dict[str, Any]]] = Field(None, description="헬스체크 결과")
 
 class VMInfo(BaseModel):
     """VM 정보"""

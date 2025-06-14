@@ -1,23 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 외부 접근 허용
-  experimental: {
-    serverComponentsExternalPackages: [],
-  },
+  // 외부 패키지 설정 (Next.js 15 호환)
+  serverExternalPackages: [],
   
-  // API 리라이트 설정 (VM 환경용)
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`,
-      },
-    ];
-  },
-  
-  // 환경별 설정
+  // 환경별 설정 (API URL은 Nginx를 통해 직접 호출)
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    // Docker 환경에서는 Nginx를 통해 API 호출
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',
   },
 };
 
