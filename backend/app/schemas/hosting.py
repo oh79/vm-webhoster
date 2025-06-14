@@ -31,6 +31,12 @@ class HostingResponse(BaseModel):
     created_at: datetime = Field(..., description="생성 시간")
     updated_at: datetime = Field(..., description="수정 시간")
     
+    # 웹 접속 정보 (과제 요구사항)
+    web_url: Optional[str] = Field(None, description="웹 접속 URL (/<user_id>)")
+    direct_web_url: Optional[str] = Field(None, description="직접 웹 접속 URL")
+    ssh_command: Optional[str] = Field(None, description="SSH 접속 명령어")
+    web_port: Optional[int] = Field(None, description="웹 포트 번호")
+    
     model_config = {"from_attributes": True}
 
 class HostingDetail(HostingResponse):

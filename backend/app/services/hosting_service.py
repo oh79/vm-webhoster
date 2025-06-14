@@ -85,47 +85,54 @@ class HostingService:
             logger.info(f"호스팅 레코드 생성: 사용자 {user_id}, VM {vm_id}, 호스팅 ID {hosting.id}")
             
             try:
-                # VM 생성 (웹서버 자동 설치 포함)
+                # VM 생성
                 logger.info(f"VM 생성 시작: {vm_id}")
-                vm_result = self.vm_service.create_vm(vm_id, ssh_port, user_id=str(user_id))
-                created_resources['vm_created'] = True
+                vm_result = self.vm_service.create_vm(vm_id, ssh_port, str(user_id))
+                created_resources['vm'] = True
                 
-                # 호스팅 정보 업데이트
-                hosting.vm_ip = vm_result["vm_ip"]
-                hosting.status = HostingStatus.RUNNING  # 임시로 RUNNING 상태로 설정
+                # VM 결과에서 웹 포트 및 기타 정보 추출
+                vm_ip = vm_result.get('vm_ip', '127.0.0.1')
+                web_port = vm_result.get('web_port', 8000)
+                container_name = vm_result.get('container_name')
+                web_dir = vm_result.get('web_dir')
+                
+                logger.info(f"VM 생성 완료: {vm_id}, IP: {vm_ip}, 웹포트: {web_port}")
+                
+                # 호스팅 레코드 업데이트 (IP와 실제 정보로)
+                hosting.vm_ip = vm_ip
+                hosting.status = HostingStatus.RUNNING  # VM 생성 성공 시 바로 RUNNING 상태
                 self.db.commit()
                 
-                logger.info(f"VM 생성 완료: {vm_id}, IP: {vm_result['vm_ip']}")
+                # 프록시 설정 (사용자별 URL 라우팅)
+                logger.info(f"프록시 설정 시작: 사용자 {user_id}")
+                proxy_result = self.proxy_service.add_proxy_rule(
+                    user_id=str(user_id), 
+                    vm_ip=vm_ip, 
+                    ssh_port=ssh_port,
+                    web_port=web_port
+                )
+                created_resources['proxy'] = True
                 
-                try:
-                    # 프록시 규칙 추가 (웹 접속 및 SSH 포워딩)
-                    logger.info(f"프록시 규칙 추가 시작: 사용자 {user_id}")
-                    proxy_result = self.proxy_service.add_proxy_rule(
-                        user_id=str(user_id),
-                        vm_ip=vm_result["vm_ip"],
-                        ssh_port=ssh_port
-                    )
-                    created_resources['proxy_added'] = True
-                    
-                    # 호스팅 상태를 RUNNING으로 최종 확정
-                    hosting.status = HostingStatus.RUNNING
-                    self.db.commit()
-                    self.db.refresh(hosting)
-                    
-                    logger.info(f"프록시 규칙 추가 완료: {proxy_result.get('web_url', 'N/A')}")
-                    logger.info(f"호스팅 생성 완료: 사용자 {user_id}, VM {vm_id}")
-                    
-                    # 백그라운드에서 헬스체크 시작
-                    self._schedule_health_check(hosting.id)
-                    
-                    return hosting
-                    
-                except Exception as proxy_error:
-                    logger.error(f"프록시 설정 실패: {proxy_error}")
-                    # 프록시 설정 실패 시 완전한 롤백
-                    self._rollback_resources(created_resources)
-                    raise VMOperationError(f"프록시 설정 실패: {proxy_error}")
-                    
+                logger.info(f"프록시 설정 완료: {proxy_result}")
+                
+                # 최종 호스팅 정보 업데이트
+                hosting.vm_ip = vm_ip
+                hosting.status = HostingStatus.RUNNING
+                self.db.commit()
+                
+                # 성공 로그
+                logger.info(
+                    f"호스팅 생성 완료: 사용자 {user_id}, "
+                    f"VM {vm_id}, "
+                    f"웹 URL: {proxy_result.get('web_url', 'N/A')}, "
+                    f"SSH: {proxy_result.get('ssh_command', 'N/A')}"
+                )
+                
+                # 추가 정보는 로깅용으로만 사용하고, hosting 객체에는 설정하지 않음
+                logger.info(f"추가 정보 - 웹포트: {web_port}, 컨테이너: {container_name}, 웹디렉토리: {web_dir}")
+                
+                return hosting
+                
             except Exception as vm_error:
                 logger.error(f"VM 생성 실패: {vm_error}")
                 # VM 생성 실패 시 호스팅 상태 업데이트 후 롤백

@@ -763,75 +763,122 @@ maxretry = 6
     
     def create_vm(self, vm_id: str, ssh_port: int, user_id: str = None) -> Dict[str, str]:
         """
-        VM 생성 및 시작 (개발 환경용 Mock 버전)
+        Docker 컨테이너 기반 웹 호스팅 생성 (실제 구현)
         """
         try:
-            # 개발 환경에서는 실제 VM을 생성하지 않고 Mock 데이터 반환
-            if settings.DEBUG:
-                logger.info(f"개발 환경: Mock VM 생성 - {vm_id}")
-                
-                # Mock 데이터 반환
-                return {
-                    "vm_id": vm_id,
-                    "vm_ip": f"192.168.122.{100 + (hash(vm_id) % 50)}",  # Mock IP
-                    "disk_path": str(self.image_path / f"{vm_id}.qcow2"),
-                    "cloud_init_iso": None,
-                    "status": HostingStatus.RUNNING.value
-                }
+            logger.info(f"Docker 컨테이너 생성 시작: {vm_id}")
             
-            # 프로덕션 환경에서는 실제 VM 생성
-            # 1. 디스크 이미지 생성
-            disk_path = self.create_vm_disk(vm_id)
+            # Docker 컨테이너 이름
+            container_name = f"webhost-{vm_id}"
             
-            # 2. cloud-init 설정 생성 (웹서버 자동 설치)
-            cloud_init_iso = None
-            if user_id:
-                try:
-                    cloud_init_iso = self.create_cloud_init_config(vm_id, user_id)
-                    logger.info(f"cloud-init 설정 생성 완료: {cloud_init_iso}")
-                except Exception as e:
-                    logger.warning(f"cloud-init 설정 생성 실패, 기본 설정으로 진행: {e}")
+            # 웹 포트 할당 (8000번대 사용)
+            web_port = 8000 + (hash(vm_id) % 1000)
             
-            # 3. VM XML 정의 생성
-            vm_xml = self.create_vm_xml(vm_id, disk_path, ssh_port, cloud_init_iso)
+            # 컨테이너용 웹 디렉토리 생성 (절대 경로 사용)
+            host_web_dir = self.image_path / "containers" / vm_id / "www"
+            host_web_dir.mkdir(parents=True, exist_ok=True)
             
-            # 4. VM 정의 등록
-            xml_file = f"/tmp/{vm_id}.xml"
-            with open(xml_file, 'w') as f:
-                f.write(vm_xml)
+            # 절대 경로로 변환
+            host_web_dir_abs = host_web_dir.resolve()
+            logger.info(f"웹 디렉토리 절대 경로: {host_web_dir_abs}")
             
-            # libvirt에 VM 정의
-            subprocess.run([
-                "virsh", "define", xml_file
-            ], check=True, timeout=30)
+            # 기본 index.html 생성
+            index_html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹 호스팅 - 사용자 {user_id}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }}
+        .container {{
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }}
+        h1 {{ margin-bottom: 20px; }}
+        .info {{ margin: 10px 0; opacity: 0.9; }}
+        .success {{ color: #2ecc71; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 웹 호스팅 서비스</h1>
+        <p class="success">호스팅이 성공적으로 생성되었습니다!</p>
+        <div class="info">사용자 ID: {user_id}</div>
+        <div class="info">VM ID: {vm_id}</div>
+        <div class="info">SSH 포트: {ssh_port}</div>
+        <div class="info">웹 포트: {web_port}</div>
+        <p>이 디렉토리에 웹 파일을 업로드하여 사이트를 만들어보세요!</p>
+    </div>
+</body>
+</html>"""
             
-            # 5. VM 시작
-            subprocess.run([
-                "virsh", "start", vm_id
-            ], check=True, timeout=30)
+            with open(host_web_dir / "index.html", "w", encoding="utf-8") as f:
+                f.write(index_html)
             
-            # 6. IP 주소 할당 대기 및 조회
-            vm_ip = self.get_vm_ip(vm_id)
+            # Docker 컨테이너 실행 (Ubuntu + Nginx + SSH) - 절대 경로 사용
+            docker_cmd = [
+                "docker", "run", "-d",
+                "--name", container_name,
+                "-p", f"{web_port}:80",  # 웹 포트 포워딩
+                "-p", f"{ssh_port}:22",  # SSH 포트 포워딩
+                "-v", f"{host_web_dir_abs}:/var/www/html",  # 절대 경로로 웹 디렉토리 마운트
+                "-e", f"USER_ID={user_id}",
+                "-e", f"VM_ID={vm_id}",
+                "nginx:alpine"  # 경량 Nginx 이미지 사용
+            ]
             
-            logger.info(f"VM 생성 완료: {vm_id}, IP: {vm_ip}")
+            logger.info(f"Docker 명령어: {' '.join(docker_cmd)}")
+            
+            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode != 0:
+                logger.error(f"Docker 컨테이너 생성 실패: {result.stderr}")
+                raise VMOperationError(f"컨테이너 생성 실패: {result.stderr}")
+            
+            container_id = result.stdout.strip()
+            
+            # 컨테이너 IP 조회
+            ip_cmd = ["docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name]
+            ip_result = subprocess.run(ip_cmd, capture_output=True, text=True, timeout=30)
+            
+            if ip_result.returncode == 0 and ip_result.stdout.strip():
+                vm_ip = ip_result.stdout.strip()
+            else:
+                vm_ip = "127.0.0.1"  # 로컬호스트로 폴백
+            
+            logger.info(f"Docker 컨테이너 생성 완료: {container_name}, 웹포트: {web_port}, SSH포트: {ssh_port}")
             
             return {
                 "vm_id": vm_id,
                 "vm_ip": vm_ip,
-                "disk_path": disk_path,
-                "cloud_init_iso": cloud_init_iso,
+                "web_port": web_port,
+                "ssh_port": ssh_port,
+                "container_name": container_name,
+                "container_id": container_id,
+                "web_dir": str(host_web_dir_abs),
                 "status": HostingStatus.RUNNING.value
             }
             
         except subprocess.CalledProcessError as e:
-            logger.error(f"VM 생성 실패: {e}")
-            # 실패 시 정리
-            self.cleanup_vm(vm_id)
-            raise VMOperationError(f"VM 생성에 실패했습니다: {e}")
+            logger.error(f"Docker 컨테이너 생성 실패: {e}")
+            raise VMOperationError(f"웹 호스팅 생성에 실패했습니다: {e}")
         except Exception as e:
-            logger.error(f"예상치 못한 VM 생성 오류: {e}")
-            self.cleanup_vm(vm_id)
-            raise VMOperationError(f"VM 생성 중 오류가 발생했습니다: {e}")
+            logger.error(f"예상치 못한 컨테이너 생성 오류: {e}")
+            raise VMOperationError(f"웹 호스팅 생성 중 오류가 발생했습니다: {e}")
     
     def get_vm_ip(self, vm_id: str, timeout: int = 60) -> str:
         """
