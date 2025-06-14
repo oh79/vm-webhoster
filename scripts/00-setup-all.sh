@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 🚀 웹 호스팅 서비스 완전 자동 설치 스크립트
-# Ubuntu 22.04 LTS Clean 환경 → Production Ready 서비스
+# 🚀 웹 호스팅 서비스 로컬 개발 환경 설치 스크립트
+# Ubuntu 22.04 LTS Clean 환경 → 로컬 개발 환경
 # 실행: chmod +x scripts/00-setup-all.sh && ./scripts/00-setup-all.sh
 
 set -e  # 오류 발생 시 스크립트 중단
@@ -53,10 +53,10 @@ show_progress() {
 clear
 echo -e "${GREEN}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                🚀 웹 호스팅 서비스 완전 자동 설치              ║"
+echo "║                🚀 웹 호스팅 서비스 로컬 개발 환경 설치          ║"
 echo "║                                                              ║"
-echo "║  Ubuntu 22.04 Clean → Production Ready 서비스                ║"
-echo "║  예상 소요 시간: 10-15분                                      ║"
+echo "║  Ubuntu 22.04 Clean → 로컬 개발 환경                          ║"
+echo "║  예상 소요 시간: 15-20분                                      ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -68,7 +68,7 @@ if [[ ! $confirm =~ ^[Yy]$ ]]; then
 fi
 
 # 총 단계 수
-TOTAL_STEPS=15
+TOTAL_STEPS=18
 CURRENT_STEP=0
 
 # Step 1: 시스템 정보 확인
@@ -119,40 +119,71 @@ sudo apt install -y \
     build-essential \
     python3 \
     python3-pip \
-    python3-venv
+    python3-venv \
+    python3-dev \
+    pkg-config \
+    libpq-dev
 
 log_success "필수 패키지 설치 완료"
 
-# Step 4: Docker 설치
+# Step 4: PostgreSQL 설치
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "Docker 설치"
+show_progress $CURRENT_STEP $TOTAL_STEPS "PostgreSQL 데이터베이스 설치"
 
-log_info "Docker 공식 GPG 키 추가..."
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+log_info "PostgreSQL 설치 중..."
+sudo apt install -y postgresql postgresql-contrib
 
-log_info "Docker 저장소 추가..."
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+log_info "PostgreSQL 서비스 시작 및 활성화..."
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
 
-log_info "Docker 패키지 설치..."
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+log_info "데이터베이스 및 사용자 생성..."
+sudo -u postgres psql << EOF
+CREATE DATABASE webhoster_db;
+CREATE USER webhoster_user WITH PASSWORD 'webhoster_pass';
+GRANT ALL PRIVILEGES ON DATABASE webhoster_db TO webhoster_user;
+ALTER USER webhoster_user CREATEDB;
+\q
+EOF
 
-log_success "Docker 설치 완료"
+log_success "PostgreSQL 설치 및 설정 완료"
 
-# Step 5: Docker 서비스 설정
+# Step 5: Redis 설치
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "Docker 서비스 설정"
+show_progress $CURRENT_STEP $TOTAL_STEPS "Redis 캐시 서버 설치"
 
-log_info "Docker 서비스 시작 및 활성화..."
-sudo systemctl start docker
-sudo systemctl enable docker
+log_info "Redis 설치 중..."
+sudo apt install -y redis-server
 
-log_info "사용자를 docker 그룹에 추가..."
-sudo usermod -aG docker $USER
+log_info "Redis 설정..."
+sudo sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf
 
-log_success "Docker 서비스 설정 완료"
+log_info "Redis 서비스 시작 및 활성화..."
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
 
-# Step 6: KVM/QEMU 설치
+log_success "Redis 설치 및 설정 완료"
+
+# Step 6: Node.js 설치
+CURRENT_STEP=$((CURRENT_STEP + 1))
+show_progress $CURRENT_STEP $TOTAL_STEPS "Node.js 및 npm 설치"
+
+log_info "Node.js 18.x 저장소 추가..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+
+log_info "Node.js 설치..."
+sudo apt install -y nodejs
+
+log_info "npm 업데이트..."
+sudo npm install -g npm@latest
+
+log_info "설치된 버전 확인:"
+echo "  - Node.js: $(node --version)"
+echo "  - npm: $(npm --version)"
+
+log_success "Node.js 설치 완료"
+
+# Step 7: KVM/QEMU 설치 (VM 호스팅용)
 CURRENT_STEP=$((CURRENT_STEP + 1))
 show_progress $CURRENT_STEP $TOTAL_STEPS "KVM/QEMU 가상화 환경 설치"
 
@@ -177,7 +208,7 @@ sudo apt install -y \
 
 log_success "KVM/QEMU 설치 완료"
 
-# Step 7: libvirt 설정
+# Step 8: libvirt 설정
 CURRENT_STEP=$((CURRENT_STEP + 1))
 show_progress $CURRENT_STEP $TOTAL_STEPS "libvirt 서비스 설정"
 
@@ -194,99 +225,99 @@ sudo virsh net-autostart default
 
 log_success "libvirt 설정 완료"
 
-# Step 8: Python 환경 설정
+# Step 9: Nginx 설치 (프록시용)
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "Python 개발 환경 설정"
+show_progress $CURRENT_STEP $TOTAL_STEPS "Nginx 웹서버 설치"
 
-log_info "Python 패키지 업데이트..."
-python3 -m pip install --upgrade pip setuptools wheel
+log_info "Nginx 설치..."
+sudo apt install -y nginx
 
-log_success "Python 환경 설정 완료"
+log_info "Nginx 서비스 시작 및 활성화..."
+sudo systemctl start nginx
+sudo systemctl enable nginx
 
-# Step 9: 프로젝트 디렉토리 확인
+log_success "Nginx 설치 완료"
+
+# Step 10: 프로젝트 디렉토리 확인 및 생성
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "프로젝트 환경 확인"
-
-if [ ! -f "docker-compose.yml" ]; then
-    log_error "docker-compose.yml 파일을 찾을 수 없습니다."
-    log_info "프로젝트 루트 디렉토리에서 스크립트를 실행해주세요."
-    exit 1
-fi
+show_progress $CURRENT_STEP $TOTAL_STEPS "프로젝트 환경 설정"
 
 log_info "필요한 디렉토리 생성..."
 mkdir -p nginx/static
+mkdir -p nginx-configs
 mkdir -p scripts
 mkdir -p logs
 mkdir -p backend/uploads
 mkdir -p backend/vm-images
+mkdir -p backups
 
-log_success "프로젝트 환경 확인 완료"
+log_info "권한 설정..."
+chmod 755 nginx/static
+chmod 755 logs
+chmod 755 backend/uploads
+chmod 755 backend/vm-images
 
-# Step 10: 환경 변수 설정
+log_success "프로젝트 환경 설정 완료"
+
+# Step 11: 환경 변수 설정
 CURRENT_STEP=$((CURRENT_STEP + 1))
 show_progress $CURRENT_STEP $TOTAL_STEPS "환경 변수 설정"
 
-if [ ! -f "backend/.env" ]; then
-    log_info "환경 변수 파일 생성..."
-    cat > backend/.env << 'EOF'
-# 데이터베이스 설정
-DATABASE_URL=postgresql://webhoster_user:webhoster_pass@db:5432/webhoster_db
-
-# JWT 및 보안 설정
-SECRET_KEY=super-secret-jwt-key-change-in-production-$(openssl rand -hex 16)
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
-
-# VM 관리 설정
-VM_IMAGE_PATH=/app/vm-images
-VM_BRIDGE_NAME=virbr0
-VM_TEMPLATE_IMAGE=ubuntu-22.04-cloud.qcow2
-SSH_PORT_RANGE_START=10000
-SSH_PORT_RANGE_END=20000
-
-# Nginx 프록시 설정
-NGINX_CONFIG_PATH=/app/nginx-configs
-SERVICE_DOMAIN=localhost:80
-
-# 로깅 설정
-LOG_LEVEL=INFO
-DEBUG=true
-
-# 프로젝트 정보
-PROJECT_NAME=웹 호스팅 서비스
-VERSION=1.0.0
-DESCRIPTION=Docker 기반 웹 호스팅 서비스
-EOF
-    log_success "환경 변수 파일 생성 완료"
+if [ -f "local.env" ]; then
+    log_info "local.env에서 .env로 환경 변수 복사..."
+    cp local.env .env
+    cp local.env backend/.env
+    log_success "환경 변수 파일 복사 완료"
 else
-    log_info "환경 변수 파일이 이미 존재합니다."
+    log_error "local.env 파일을 찾을 수 없습니다."
+    exit 1
 fi
 
-# Step 11: Docker 이미지 빌드
+# Step 12: Python 가상환경 설정
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "Docker 이미지 빌드"
+show_progress $CURRENT_STEP $TOTAL_STEPS "Python 백엔드 환경 설정"
 
-log_info "Docker 이미지 빌드 중... (시간이 걸릴 수 있습니다)"
-log_cmd "docker-compose build --no-cache"
+log_info "Python 가상환경 생성..."
+cd backend
+python3 -m venv venv
 
-# 새 그룹 권한 적용을 위해 newgrp 사용
-if groups $USER | grep -q '\bdocker\b'; then
-    docker-compose build --no-cache
-else
-    log_info "Docker 그룹 권한 적용 중..."
-    newgrp docker << EONG
-docker-compose build --no-cache
-EONG
-fi
+log_info "가상환경 활성화 및 패키지 설치..."
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
 
-log_success "Docker 이미지 빌드 완료"
+log_success "Python 백엔드 환경 설정 완료"
+cd ..
 
-# Step 12: Ubuntu Cloud 이미지 다운로드
+# Step 13: 프론트엔드 의존성 설치
+CURRENT_STEP=$((CURRENT_STEP + 1))
+show_progress $CURRENT_STEP $TOTAL_STEPS "프론트엔드 환경 설정"
+
+log_info "프론트엔드 의존성 설치..."
+cd frontend
+npm install
+
+log_success "프론트엔드 환경 설정 완료"
+cd ..
+
+# Step 14: 데이터베이스 마이그레이션
+CURRENT_STEP=$((CURRENT_STEP + 1))
+show_progress $CURRENT_STEP $TOTAL_STEPS "데이터베이스 마이그레이션"
+
+log_info "데이터베이스 마이그레이션 실행..."
+cd backend
+source venv/bin/activate
+python -m alembic upgrade head
+cd ..
+
+log_success "데이터베이스 마이그레이션 완료"
+
+# Step 15: Ubuntu Cloud 이미지 다운로드
 CURRENT_STEP=$((CURRENT_STEP + 1))
 show_progress $CURRENT_STEP $TOTAL_STEPS "Ubuntu Cloud 이미지 준비"
 
 CLOUD_IMAGE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
-CLOUD_IMAGE_PATH="/tmp/ubuntu-22.04-cloud.qcow2"
+CLOUD_IMAGE_PATH="./backend/vm-images/ubuntu-22.04-cloud.qcow2"
 
 if [ ! -f "$CLOUD_IMAGE_PATH" ]; then
     log_info "Ubuntu 22.04 Cloud 이미지 다운로드 중..."
@@ -296,135 +327,160 @@ else
     log_info "Ubuntu Cloud 이미지가 이미 존재합니다."
 fi
 
-# Step 13: 서비스 시작
+# Step 16: 로컬 실행 스크립트 생성
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "서비스 시작"
+show_progress $CURRENT_STEP $TOTAL_STEPS "실행 스크립트 생성"
 
-log_info "Docker Compose 서비스 시작..."
-log_cmd "docker-compose up -d"
+# 백엔드 실행 스크립트
+cat > scripts/start-backend.sh << 'EOF'
+#!/bin/bash
+echo "🚀 백엔드 서버 시작 중..."
+cd backend
+source venv/bin/activate
+export $(cat .env | xargs)
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+EOF
 
-if groups $USER | grep -q '\bdocker\b'; then
-    docker-compose up -d
-else
-    newgrp docker << EONG
-docker-compose up -d
-EONG
-fi
+# 프론트엔드 실행 스크립트
+cat > scripts/start-frontend.sh << 'EOF'
+#!/bin/bash
+echo "🚀 프론트엔드 서버 시작 중..."
+cd frontend
+npm run dev
+EOF
 
-log_success "서비스 시작 완료"
+# 전체 서비스 실행 스크립트
+cat > scripts/start-all.sh << 'EOF'
+#!/bin/bash
+echo "🚀 모든 서비스 시작 중..."
 
-# Step 14: 서비스 상태 확인
+# 백엔드 백그라운드 실행
+echo "백엔드 서버 시작..."
+cd backend
+source venv/bin/activate
+export $(cat .env | xargs)
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > ../logs/backend.log 2>&1 &
+BACKEND_PID=$!
+echo "백엔드 PID: $BACKEND_PID"
+cd ..
+
+# 잠시 대기
+sleep 3
+
+# 프론트엔드 실행
+echo "프론트엔드 서버 시작..."
+cd frontend
+npm run dev
+EOF
+
+# 서비스 중지 스크립트
+cat > scripts/stop-all.sh << 'EOF'
+#!/bin/bash
+echo "🛑 모든 서비스 중지 중..."
+
+# 백엔드 프로세스 종료
+pkill -f "uvicorn app.main:app"
+
+# 프론트엔드 프로세스 종료
+pkill -f "next-server"
+
+echo "모든 서비스가 중지되었습니다."
+EOF
+
+# 실행 권한 부여
+chmod +x scripts/start-backend.sh
+chmod +x scripts/start-frontend.sh
+chmod +x scripts/start-all.sh
+chmod +x scripts/stop-all.sh
+
+log_success "실행 스크립트 생성 완료"
+
+# Step 17: 서비스 상태 확인
 CURRENT_STEP=$((CURRENT_STEP + 1))
 show_progress $CURRENT_STEP $TOTAL_STEPS "서비스 상태 확인"
 
-log_info "서비스 준비 대기 중..."
-sleep 15
+log_info "설치된 서비스 상태 확인..."
 
-# 서비스 상태 확인
-services=("webhoster_db" "webhoster_backend" "webhoster_nginx" "webhoster_redis")
+# PostgreSQL 상태 확인
+if systemctl is-active --quiet postgresql; then
+    log_success "PostgreSQL: 실행 중"
+else
+    log_error "PostgreSQL: 실행 실패"
+fi
 
-for service in "${services[@]}"; do
-    if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -q "$service.*Up"; then
-        log_success "$service: 실행 중"
-    else
-        log_error "$service: 실행 실패"
-        log_info "로그 확인: docker-compose logs $service"
-    fi
-done
+# Redis 상태 확인
+if systemctl is-active --quiet redis-server; then
+    log_success "Redis: 실행 중"
+else
+    log_error "Redis: 실행 실패"
+fi
 
-# Step 15: 헬스체크 및 완료
+# Nginx 상태 확인
+if systemctl is-active --quiet nginx; then
+    log_success "Nginx: 실행 중"
+else
+    log_error "Nginx: 실행 실패"
+fi
+
+# libvirt 상태 확인
+if systemctl is-active --quiet libvirtd; then
+    log_success "libvirt: 실행 중"
+else
+    log_error "libvirt: 실행 실패"
+fi
+
+# Step 18: 설치 완료
 CURRENT_STEP=$((CURRENT_STEP + 1))
-show_progress $CURRENT_STEP $TOTAL_STEPS "최종 헬스체크 및 완료"
-
-log_info "헬스체크 수행 중..."
-
-# 데이터베이스 연결 확인
-if docker-compose exec -T db pg_isready -U webhoster_user -d webhoster_db >/dev/null 2>&1; then
-    log_success "데이터베이스: 연결 성공"
-else
-    log_warning "데이터베이스: 연결 대기 중..."
-fi
-
-# 백엔드 API 확인
-sleep 5
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/health 2>/dev/null | grep -q "200"; then
-    log_success "백엔드 API: 응답 성공"
-else
-    log_warning "백엔드 API: 준비 중..."
-fi
-
-# Nginx 확인
-if curl -s -o /dev/null -w "%{http_code}" http://localhost/ 2>/dev/null | grep -q "200"; then
-    log_success "Nginx: 응답 성공"
-else
-    log_warning "Nginx: 준비 중..."
-fi
+show_progress $CURRENT_STEP $TOTAL_STEPS "설치 완료"
 
 # 설치 완료 메시지
 clear
 echo -e "${GREEN}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                    🎉 설치 완료!                             ║"
+echo "║                    🎉 로컬 개발 환경 설치 완료!               ║"
 echo "║                                                              ║"
-echo "║  웹 호스팅 서비스가 성공적으로 설치되었습니다!                  ║"
+echo "║  웹 호스팅 서비스 로컬 개발 환경이 성공적으로 설치되었습니다!    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
 echo
-log_success "🚀 웹 호스팅 서비스 설치가 완료되었습니다!"
+log_success "🚀 웹 호스팅 서비스 로컬 개발 환경 설치가 완료되었습니다!"
 echo
-log_info "📋 서비스 접속 정보:"
-echo "   • 🌐 웹 인터페이스: http://localhost"
-echo "   • 📚 API 문서: http://localhost:8000/docs"
-echo "   • 🔍 헬스체크: http://localhost:8000/api/v1/health"
-echo "   • 🗄️ 데이터베이스: localhost:5432 (webhoster_db)"
-echo "   • 🔄 Redis: localhost:6379"
+log_info "📋 서비스 실행 방법:"
+echo "   • 🔧 백엔드만 실행: ./scripts/start-backend.sh"
+echo "   • 🎨 프론트엔드만 실행: ./scripts/start-frontend.sh"
+echo "   • 🚀 모든 서비스 실행: ./scripts/start-all.sh"
+echo "   • 🛑 모든 서비스 중지: ./scripts/stop-all.sh"
 echo
-log_info "🔧 관리 명령어:"
-echo "   • 서비스 상태: docker-compose ps"
-echo "   • 로그 확인: docker-compose logs -f"
-echo "   • 서비스 중지: docker-compose down"
-echo "   • 서비스 재시작: docker-compose restart"
+log_info "🌐 서비스 접속 정보:"
+echo "   • 프론트엔드: http://localhost:3000"
+echo "   • 백엔드 API: http://localhost:8000"
+echo "   • API 문서: http://localhost:8000/docs"
+echo "   • 헬스체크: http://localhost:8000/api/v1/health"
 echo
-log_info "🧪 테스트 계정:"
-echo "   • 이메일: test@example.com"
-echo "   • 비밀번호: testpass123"
+log_info "🗄️ 데이터베이스 정보:"
+echo "   • PostgreSQL: localhost:5432 (webhoster_db)"
+echo "   • Redis: localhost:6379"
+echo "   • 사용자: webhoster_user / webhoster_pass"
 echo
-log_info "🎯 사용 방법:"
-echo "   1. 회원가입: curl -X POST http://localhost:8000/api/v1/auth/register \\"
-echo "      -H 'Content-Type: application/json' \\"
-echo "      -d '{\"email\":\"user@example.com\",\"password\":\"pass123\",\"username\":\"user\"}'"
+log_info "🔧 개발 도구:"
+echo "   • 백엔드 로그: tail -f logs/backend.log"
+echo "   • 데이터베이스 접속: psql -h localhost -U webhoster_user -d webhoster_db"
+echo "   • Redis 접속: redis-cli"
 echo
-echo "   2. 로그인: curl -X POST http://localhost:8000/api/v1/auth/login \\"
-echo "      -d 'username=user@example.com&password=pass123'"
-echo
-echo "   3. 호스팅 생성: curl -X POST http://localhost:8000/api/v1/host \\"
-echo "      -H 'Authorization: Bearer {token}'"
-echo
-echo "   4. 웹 접속: http://localhost/{user_id}"
-echo "   5. SSH 접속: ssh -p {port} ubuntu@localhost"
+log_info "🎯 개발 시작하기:"
+echo "   1. 새 터미널에서: ./scripts/start-backend.sh"
+echo "   2. 또 다른 터미널에서: ./scripts/start-frontend.sh"
+echo "   3. 브라우저에서 http://localhost:3000 접속"
 echo
 
 log_warning "⚠️  중요 안내:"
 echo "   • 새 터미널을 열거나 다음 명령어를 실행하여 그룹 권한을 적용하세요:"
-echo "     newgrp docker"
+echo "     newgrp libvirt"
 echo "   • 또는 시스템을 재부팅하세요."
 echo
 
-# 브라우저 열기 옵션
-read -p "브라우저를 열어 서비스에 접속하시겠습니까? (y/N): " browser_choice
-if [[ $browser_choice =~ ^[Yy]$ ]]; then
-    if command -v xdg-open &> /dev/null; then
-        xdg-open http://localhost
-    elif command -v open &> /dev/null; then
-        open http://localhost
-    else
-        log_info "브라우저를 수동으로 열어 http://localhost에 접속하세요."
-    fi
-fi
-
-log_success "🎉 웹 호스팅 서비스 설치 및 설정이 완료되었습니다!"
+log_success "🎉 로컬 개발 환경 설치가 완료되었습니다!"
 echo
-echo -e "${CYAN}📖 추가 문서: README.md, docs/implementation-report.md${NC}"
-echo -e "${CYAN}🔗 GitHub: https://github.com/your-org/vm-webhoster${NC}"
+echo -e "${CYAN}📖 다음 단계: ./scripts/start-all.sh 실행하여 서비스 시작${NC}"
 echo 

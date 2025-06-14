@@ -63,14 +63,6 @@ scrape_configs:
       - targets: ['node-exporter:9100']
     scrape_interval: 15s
 
-# 데이터 저장 설정
-storage:
-  tsdb:
-    retention.time: 15d
-    retention.size: 10GB
-    path: /prometheus
-    wal-compression: true
-
 # 원격 쓰기 설정 (선택사항)
 # remote_write:
 #   - url: "https://remote-storage-endpoint/api/v1/write" 
