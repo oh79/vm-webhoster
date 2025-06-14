@@ -851,6 +851,24 @@ maxretry = 6
             
             container_id = result.stdout.strip()
             
+            # nginx 설정을 올바른 웹 디렉토리로 수정 (nginx:alpine 컨테이너 대응)
+            nginx_config_cmd = [
+                "docker", "exec", container_name,
+                "sed", "-i", "s|/usr/share/nginx/html|/var/www/html|g", "/etc/nginx/conf.d/default.conf"
+            ]
+            
+            config_result = subprocess.run(nginx_config_cmd, capture_output=True, text=True, timeout=30)
+            if config_result.returncode == 0:
+                # nginx 다시 로드
+                reload_cmd = ["docker", "exec", container_name, "nginx", "-s", "reload"]
+                reload_result = subprocess.run(reload_cmd, capture_output=True, text=True, timeout=30)
+                if reload_result.returncode == 0:
+                    logger.info(f"컨테이너 {container_name}의 nginx 설정 자동 구성 완료")
+                else:
+                    logger.warning(f"컨테이너 {container_name}의 nginx 리로드 실패: {reload_result.stderr}")
+            else:
+                logger.warning(f"컨테이너 {container_name}의 nginx 설정 변경 실패: {config_result.stderr}")
+            
             # 컨테이너 IP 조회
             ip_cmd = ["docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name]
             ip_result = subprocess.run(ip_cmd, capture_output=True, text=True, timeout=30)
