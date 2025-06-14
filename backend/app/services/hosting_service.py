@@ -10,6 +10,7 @@ from app.models.hosting import Hosting, HostingStatus
 from app.models.user import User
 from app.schemas.hosting import HostingCreate, HostingUpdate, HostingStats
 from app.services.vm_service import VMService
+from app.services.proxy_service import ProxyService
 from app.core.exceptions import (
     HostingNotFoundError,
     HostingAlreadyExistsError,
@@ -27,10 +28,11 @@ class HostingService:
     def __init__(self, db: Session):
         self.db = db
         self.vm_service = VMService()
+        self.proxy_service = ProxyService()
     
     def create_hosting(self, user_id: int, hosting_data: HostingCreate) -> Hosting:
         """
-        새 호스팅 생성
+        새 호스팅 생성 (프록시 규칙 자동 추가 포함)
         """
         # 사용자 존재 확인
         user = self.db.query(User).filter(User.id == user_id).first()
@@ -41,6 +43,9 @@ class HostingService:
         existing_hosting = self.db.query(Hosting).filter(Hosting.user_id == user_id).first()
         if existing_hosting:
             raise HostingAlreadyExistsError("이미 호스팅을 보유하고 있습니다.")
+        
+        vm_id = None
+        hosting = None
         
         try:
             # VM ID 생성
@@ -62,32 +67,80 @@ class HostingService:
             self.db.commit()
             self.db.refresh(hosting)
             
+            logger.info(f"호스팅 레코드 생성: 사용자 {user_id}, VM {vm_id}")
+            
             try:
-                # VM 생성 (백그라운드에서 실행될 수 있음)
-                vm_result = self.vm_service.create_vm(vm_id, ssh_port)
+                # VM 생성 (웹서버 자동 설치 포함)
+                vm_result = self.vm_service.create_vm(vm_id, ssh_port, user_id=str(user_id))
                 
                 # 호스팅 정보 업데이트
                 hosting.vm_ip = vm_result["vm_ip"]
-                hosting.status = HostingStatus.RUNNING
                 self.db.commit()
-                self.db.refresh(hosting)
                 
-                logger.info(f"호스팅 생성 완료: 사용자 {user_id}, VM {vm_id}")
+                logger.info(f"VM 생성 완료: {vm_id}, IP: {vm_result['vm_ip']}")
                 
-            except VMOperationError as e:
+                try:
+                    # 프록시 규칙 추가 (웹 접속 및 SSH 포워딩)
+                    proxy_result = self.proxy_service.add_proxy_rule(
+                        user_id=str(user_id),
+                        vm_ip=vm_result["vm_ip"],
+                        ssh_port=ssh_port
+                    )
+                    
+                    # 호스팅 상태를 RUNNING으로 변경
+                    hosting.status = HostingStatus.RUNNING
+                    self.db.commit()
+                    self.db.refresh(hosting)
+                    
+                    logger.info(f"프록시 규칙 추가 완료: {proxy_result['web_url']}")
+                    logger.info(f"호스팅 생성 완료: 사용자 {user_id}, VM {vm_id}")
+                    
+                except Exception as proxy_error:
+                    # 프록시 설정 실패 시 VM 삭제 (롤백)
+                    logger.error(f"프록시 설정 실패, VM 삭제 진행: {proxy_error}")
+                    
+                    try:
+                        self.vm_service.delete_vm(vm_id)
+                        logger.info(f"프록시 실패로 인한 VM 삭제 완료: {vm_id}")
+                    except Exception as vm_delete_error:
+                        logger.error(f"VM 삭제 실패: {vm_delete_error}")
+                    
+                    # 호스팅 상태를 ERROR로 변경
+                    hosting.status = HostingStatus.ERROR
+                    self.db.commit()
+                    
+                    raise VMOperationError(f"프록시 설정 실패: {proxy_error}")
+                    
+            except VMOperationError as vm_error:
                 # VM 생성 실패 시 호스팅 상태 업데이트
                 hosting.status = HostingStatus.ERROR
                 self.db.commit()
-                logger.error(f"VM 생성 실패: {e}")
-                raise e
+                logger.error(f"VM 생성 실패: {vm_error}")
+                raise vm_error
             
             return hosting
             
         except IntegrityError:
             self.db.rollback()
+            # 생성된 리소스 정리
+            if vm_id:
+                try:
+                    self.vm_service.delete_vm(vm_id)
+                    logger.info(f"롤백: VM 삭제 완료 {vm_id}")
+                except Exception as e:
+                    logger.error(f"롤백 중 VM 삭제 실패: {e}")
             raise HostingAlreadyExistsError("호스팅 생성 중 중복 오류가 발생했습니다.")
         except Exception as e:
             self.db.rollback()
+            # 생성된 리소스 정리
+            if vm_id:
+                try:
+                    self.vm_service.delete_vm(vm_id)
+                    self.proxy_service.remove_proxy_rule(str(user_id))
+                    logger.info(f"롤백: 리소스 정리 완료 {vm_id}")
+                except Exception as cleanup_error:
+                    logger.error(f"롤백 중 리소스 정리 실패: {cleanup_error}")
+            
             logger.error(f"호스팅 생성 실패: {e}")
             raise VMOperationError(f"호스팅 생성 중 오류가 발생했습니다: {e}")
     

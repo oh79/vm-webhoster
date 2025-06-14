@@ -502,3 +502,373 @@ FastAPI의 자동 문서화를 개선하고 추가 문서를 작성해주세요:
 - 에러 처리와 로깅 철저히
 - 보안 (SQL Injection, XSS 방지)
 - 성능 최적화 (연결 풀링, 캐싱)
+
+---
+
+# 🚀 현재 상황별 추가 Phase (2025-06-14 기준)
+
+## 현재 상태: 약 80% 구현 완료
+- ✅ 백엔드 API 및 VM 관리 완료
+- ✅ 프론트엔드 UI 완료
+- ❌ **Nginx 프록시 서비스 미구현** (핵심)
+- ❌ VM 내부 웹서버 설정 미구현
+
+---
+
+## Phase 11: 핵심 미구현 기능 완성 (최우선)
+
+### Prompt 11.1: Nginx 프록시 서비스 구현
+```
+현재 프로젝트의 핵심 미구현 부분인 Nginx 프록시 서비스를 구현해주세요:
+
+/backend/app/services/proxy_service.py를 생성:
+
+1. ProxyService 클래스:
+   - Nginx 설정 파일 경로 관리
+   - 템플릿 엔진 (Jinja2) 사용
+
+2. add_proxy_rule(user_id: str, vm_ip: str, ssh_port: int):
+   - 웹 포트 포워딩: /<user_id> → http://vm_ip:80
+   - SSH 포트 포워딩: :{ssh_port} → vm_ip:22
+   - Nginx 설정 파일 생성 (/etc/nginx/sites-available/hosting/{user_id}.conf)
+   - sites-enabled에 심볼릭 링크 생성
+   - nginx -t로 설정 검증
+   - nginx -s reload로 리로드
+
+3. remove_proxy_rule(user_id: str):
+   - 설정 파일 삭제
+   - 심볼릭 링크 제거
+   - nginx -s reload
+
+4. get_random_port(start=10000, end=20000):
+   - 사용 가능한 포트 검색
+   - 포트 충돌 방지
+
+현재 backend/app/core/config.py에 NGINX_CONFIG_PATH 설정이 있으니 활용해주세요.
+```
+
+### Prompt 11.2: Nginx 설정 템플릿 생성
+```
+/backend/templates/nginx.conf.j2 파일을 생성해주세요:
+
+Jinja2 템플릿 내용:
+1. 웹 서비스 location 블록:
+   - location /{{ user_id }} { ... }
+   - proxy_pass http://{{ vm_ip }}:80;
+   - proxy_set_header 설정들
+   - 에러 처리
+
+2. 추가로 /backend/templates/ 디렉토리에:
+   - nginx-site.conf.j2 (개별 호스팅용)
+   - nginx-main.conf.j2 (메인 설정용)
+
+3. 템플릿 변수:
+   - user_id: 사용자 ID
+   - vm_ip: VM IP 주소
+   - ssh_port: SSH 포트 번호
+   - domain: 서비스 도메인
+```
+
+### Prompt 11.3: VM 웹서버 자동 설치 구현
+```
+/backend/app/services/vm_service.py를 수정하여 VM에 웹서버를 자동 설치하도록 해주세요:
+
+1. create_cloud_init_config(vm_id: str) 메서드 추가:
+   - cloud-init user-data 생성
+   - Nginx 자동 설치 스크립트
+   - 기본 웹 페이지 생성 (/var/www/html/index.html)
+   - SSH 사용자 설정 (ubuntu 사용자)
+   - authorized_keys 설정
+
+2. create_vm() 메서드 수정:
+   - cloud-init ISO 이미지 생성
+   - VM 생성 시 cloud-init 연결
+   - 웹서버 설치 완료 대기
+
+3. 기본 웹 페이지 템플릿:
+   - 사용자별 환영 페이지
+   - 호스팅 정보 표시
+   - 파일 업로드 안내
+
+현재 VM 생성 로직이 있으니 확장하는 형태로 구현해주세요.
+```
+
+### Prompt 11.4: 호스팅 서비스와 프록시 연동
+```
+/backend/app/services/hosting_service.py를 수정하여 프록시 서비스와 연동해주세요:
+
+1. create_hosting() 메서드 수정:
+   - VM 생성 완료 후 프록시 규칙 자동 추가
+   - 프록시 설정 실패 시 VM 삭제 (롤백)
+   - 전체 과정을 트랜잭션으로 처리
+
+2. delete_hosting() 메서드 수정:
+   - VM 삭제 전 프록시 규칙 제거
+   - 순서: 프록시 제거 → VM 삭제 → DB 삭제
+
+3. 에러 처리 강화:
+   - ProxyService import 추가
+   - 각 단계별 실패 시 롤백 로직
+   - 상세한 에러 메시지
+
+현재 hosting_service.py가 12KB로 구현되어 있으니 기존 로직을 수정하는 형태로 해주세요.
+```
+
+## Phase 12: Docker 환경 완성
+
+### Prompt 12.1: Nginx 컨테이너 활성화
+```
+docker-compose.yml의 Nginx 서비스를 활성화하고 완성해주세요:
+
+현재 Nginx 서비스가 정의되어 있지만 완전하지 않습니다:
+
+1. nginx 서비스 완성:
+   - 포트 80, 443 매핑
+   - 볼륨 마운트 (설정 파일, 로그)
+   - backend 서비스와 네트워크 연결
+   - depends_on 설정
+
+2. /nginx 디렉토리 생성:
+   - nginx/nginx.conf (메인 설정)
+   - nginx/sites/ (호스팅별 설정 저장)
+   - nginx/ssl/ (SSL 인증서용)
+
+3. 네트워크 설정:
+   - 내부 통신용 네트워크
+   - VM 접근용 브리지 설정
+
+현재 docker-compose.yml에 nginx 서비스가 있으니 수정해주세요.
+```
+
+### Prompt 12.2: 프로덕션 환경 설정
+```
+프로덕션 배포를 위한 환경 설정을 완성해주세요:
+
+1. docker-compose.prod.yml 생성:
+   - 프로덕션 전용 설정
+   - 환경변수 외부화
+   - 로그 설정
+   - 리소스 제한
+
+2. .env.production.example 업데이트:
+   - SECURITY.md 내용 반영
+   - 모든 필요한 환경변수 포함
+   - 보안 주의사항 주석
+
+3. nginx/nginx.conf 프로덕션 설정:
+   - SSL/TLS 설정
+   - 보안 헤더
+   - Rate limiting
+   - 로그 설정
+
+SECURITY.md 파일의 보안 가이드를 참고해주세요.
+```
+
+## Phase 13: 통합 테스트 및 검증
+
+### Prompt 13.1: 전체 플로우 테스트
+```
+전체 호스팅 생성 플로우를 테스트하는 코드를 작성해주세요:
+
+/backend/tests/test_full_flow.py:
+
+1. test_complete_hosting_flow():
+   - 사용자 회원가입
+   - 로그인 및 토큰 발급
+   - 호스팅 생성 요청
+   - VM 생성 대기
+   - 프록시 설정 확인
+   - 웹 접속 테스트 (http://localhost/{user_id})
+   - SSH 접속 테스트
+   - 호스팅 삭제
+   - 리소스 정리 확인
+
+2. test_error_scenarios():
+   - VM 생성 실패 시나리오
+   - 프록시 설정 실패 시나리오
+   - 네트워크 오류 시나리오
+   - 롤백 동작 검증
+
+3. test_concurrent_hosting():
+   - 동시 호스팅 생성 테스트
+   - 포트 충돌 방지 테스트
+   - 리소스 경합 처리
+
+현재 backend/tests/ 디렉토리가 있으니 활용해주세요.
+```
+
+### Prompt 13.2: API 엔드포인트 최종 검증
+```
+모든 API 엔드포인트가 정상 동작하는지 검증해주세요:
+
+1. 인증 API 테스트:
+   - POST /api/v1/auth/register
+   - POST /api/v1/auth/login
+   - POST /api/v1/auth/token
+   - GET /api/v1/auth/me
+
+2. 호스팅 API 테스트:
+   - POST /api/v1/host (호스팅 생성)
+   - GET /api/v1/host/my (내 호스팅 조회)
+   - DELETE /api/v1/host/my (호스팅 삭제)
+
+3. 각 엔드포인트별 검증 스크립트:
+   - curl 명령어 예시
+   - 응답 데이터 검증
+   - 에러 케이스 처리
+
+4. 실제 브라우저에서 접속 테스트:
+   - http://localhost/{user_id} 접속
+   - ssh -p {port} ubuntu@localhost 접속
+
+검증 결과를 README.md에 스크린샷과 함께 문서화해주세요.
+```
+
+## Phase 14: 문서화 및 배포 준비
+
+### Prompt 14.1: 구현 보고서 작성
+```
+/docs/implementation-report.md를 작성해주세요:
+
+TODO.md를 참고하여 다음 내용 포함:
+
+1. 시스템 아키텍처 다이어그램 (Mermaid):
+   - 전체 구성 요소 관계
+   - 데이터 플로우
+   - 네트워크 구성
+
+2. 구현 상세 내용:
+   - 각 컴포넌트별 구현 내용
+   - 주요 기술 스택 설명
+   - 핵심 알고리즘 설명
+
+3. 배포 및 설치 가이드:
+   - Clean Ubuntu 22.04 기준
+   - Docker 설치 및 실행
+   - 환경 설정 방법
+
+4. API 사용 예시:
+   - curl 명령어 예시
+   - 각 단계별 스크린샷
+   - 트러블슈팅 가이드
+
+5. 성능 및 제한사항:
+   - 동시 사용자 수
+   - 리소스 사용량
+   - 알려진 이슈
+
+현재 PRD.md와 TODO.md 내용을 종합해주세요.
+```
+
+### Prompt 14.2: README.md 최종 업데이트
+```
+README.md를 최종 사용자 관점에서 업데이트해주세요:
+
+1. 프로젝트 소개:
+   - 완성된 기능 목록
+   - 실제 사용 시연 스크린샷
+   - 기술 스택 명시
+
+2. 빠른 시작 가이드:
+   - git clone부터 서비스 실행까지
+   - Docker 기반 원클릭 실행
+   - 첫 호스팅 생성 예시
+
+3. 주요 기능 설명:
+   - 웹 호스팅 자동 생성
+   - SSH/SFTP 접속
+   - 프록시를 통한 웹 접속
+   - 관리 대시보드
+
+4. 개발자 가이드:
+   - 로컬 개발 환경 설정
+   - 테스트 실행 방법
+   - 기여 방법
+
+5. 라이선스 및 연락처 정보
+
+완성된 프로젝트임을 강조하는 내용으로 작성해주세요.
+```
+
+## Phase 15: 최종 검토 및 완성
+
+### Prompt 15.1: 보안 검토 및 강화
+```
+SECURITY.md를 참고하여 보안 설정을 최종 검토해주세요:
+
+1. 시크릿 키 및 인증서:
+   - 개발용 키 → 프로덕션 키 변경 확인
+   - JWT 시크릿 키 강도 검증
+   - 데이터베이스 비밀번호 검증
+
+2. 네트워크 보안:
+   - VM 간 격리 설정
+   - 방화벽 규칙 설정
+   - 불필요한 포트 차단
+
+3. 권한 관리:
+   - 최소 권한 원칙 적용
+   - sudo 권한 최소화
+   - 파일 권한 설정
+
+4. 보안 테스트:
+   - SQL Injection 테스트
+   - XSS 방지 확인
+   - 인증 우회 시도
+
+보안 이슈 발견 시 즉시 수정하고 문서화해주세요.
+```
+
+### Prompt 15.2: 성능 최적화 및 최종 테스트
+```
+프로덕션 준비를 위한 최종 성능 최적화를 수행해주세요:
+
+1. 성능 벤치마크:
+   - API 응답 시간 측정
+   - VM 생성 시간 측정
+   - 동시 사용자 처리 능력
+   - 메모리 및 CPU 사용량
+
+2. 최적화 작업:
+   - 데이터베이스 쿼리 최적화
+   - 캐싱 전략 적용
+   - 연결 풀 설정
+   - 비동기 처리 개선
+
+3. 부하 테스트:
+   - 동시 호스팅 생성 테스트
+   - 대용량 파일 전송 테스트
+   - 장시간 운영 안정성 테스트
+
+4. 모니터링 설정:
+   - 로그 레벨 조정
+   - 메트릭 수집 설정
+   - 알림 시스템 구축
+
+성능 테스트 결과를 문서화하고 개선사항을 적용해주세요.
+```
+
+---
+
+## 🎯 완성 체크리스트
+
+### Phase 11 완료 후 달성 목표:
+- [ ] 웹 서비스 접속 가능: `http://localhost/{user_id}`
+- [ ] SSH 접속 가능: `ssh -p {port} ubuntu@localhost`
+- [ ] 프록시 서비스 완전 동작
+- [ ] VM 내부 웹서버 자동 설치
+
+### Phase 12-13 완료 후 달성 목표:
+- [ ] Docker 환경에서 완전 동작
+- [ ] 모든 API 엔드포인트 검증 완료
+- [ ] 통합 테스트 통과
+
+### Phase 14-15 완료 후 달성 목표:
+- [ ] 문서화 완료
+- [ ] 보안 검토 완료
+- [ ] 성능 최적화 완료
+- [ ] 프로덕션 배포 준비 완료
+
+---
+
+**다음 단계**: Phase 11.1 Nginx 프록시 서비스 구현부터 시작하세요.

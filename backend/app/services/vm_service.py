@@ -5,6 +5,8 @@ import uuid
 import subprocess
 import logging
 import xml.etree.ElementTree as ET
+import yaml
+import base64
 from typing import Optional, Dict, List
 from pathlib import Path
 
@@ -58,6 +60,238 @@ class VMService:
             logger.warning(f"포트 확인 중 오류: {e}")
             return True  # 확인할 수 없으면 사용 가능한 것으로 간주
     
+    def create_cloud_init_config(self, vm_id: str, user_id: str) -> str:
+        """
+        cloud-init 설정 생성 (웹서버 자동 설치)
+        """
+        try:
+            # cloud-init user-data 설정
+            user_data = {
+                'version': 1,
+                'users': [
+                    {
+                        'name': 'ubuntu',
+                        'sudo': 'ALL=(ALL) NOPASSWD:ALL',
+                        'shell': '/bin/bash',
+                        'ssh_authorized_keys': [
+                            # TODO: SSH 키 관리 시스템 연동
+                            'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... webhoster-default'
+                        ]
+                    }
+                ],
+                'package_update': True,
+                'packages': [
+                    'nginx',
+                    'curl',
+                    'wget',
+                    'unzip',
+                    'git'
+                ],
+                'runcmd': [
+                    # Nginx 시작 및 활성화
+                    'systemctl enable nginx',
+                    'systemctl start nginx',
+                    
+                    # 기본 웹 페이지 생성
+                    f'mkdir -p /var/www/html',
+                    f'chown -R www-data:www-data /var/www/html',
+                    f'chmod -R 755 /var/www/html',
+                    
+                    # 사용자별 환영 페이지 생성
+                    f"""cat > /var/www/html/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹 호스팅 서비스 - {user_id}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }}
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }}
+        h1 {{
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }}
+        .welcome {{
+            text-align: center;
+            font-size: 1.2em;
+            line-height: 1.6;
+            margin-bottom: 40px;
+        }}
+        .info-box {{
+            background: rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }}
+        .upload-info {{
+            background: rgba(46, 204, 113, 0.3);
+            border-left: 4px solid #2ecc71;
+        }}
+        .ssh-info {{
+            background: rgba(52, 152, 219, 0.3);
+            border-left: 4px solid #3498db;
+        }}
+        code {{
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }}
+        .footer {{
+            text-align: center;
+            margin-top: 40px;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 웹 호스팅 서비스</h1>
+        <div class="welcome">
+            <p><strong>{user_id}</strong>님의 웹 호스팅이 성공적으로 생성되었습니다!</p>
+            <p>VM ID: <code>{vm_id}</code></p>
+        </div>
+        
+        <div class="info-box upload-info">
+            <h3>📁 파일 업로드 방법</h3>
+            <p>웹 파일을 업로드하려면 다음 경로를 사용하세요:</p>
+            <p><code>/var/www/html/</code></p>
+            <p>SFTP 또는 SCP를 사용하여 파일을 업로드할 수 있습니다.</p>
+        </div>
+        
+        <div class="info-box ssh-info">
+            <h3>🔐 SSH 접속 정보</h3>
+            <p>SSH로 서버에 접속하여 직접 관리할 수 있습니다:</p>
+            <p><code>ssh ubuntu@your-domain -p YOUR_SSH_PORT</code></p>
+            <p>웹 서버 재시작: <code>sudo systemctl restart nginx</code></p>
+        </div>
+        
+        <div class="info-box">
+            <h3>📝 시작하기</h3>
+            <p>1. 이 페이지를 교체하려면 <code>/var/www/html/index.html</code>을 수정하세요</p>
+            <p>2. 정적 파일들을 <code>/var/www/html/</code>에 업로드하세요</p>
+            <p>3. PHP나 다른 언어를 사용하려면 추가 설정이 필요합니다</p>
+        </div>
+        
+        <div class="footer">
+            <p>웹 호스팅 서비스 © 2024</p>
+            <p>서버 시작 시간: $(date)</p>
+        </div>
+    </div>
+</body>
+</html>
+EOF""",
+                    
+                    # Nginx 기본 설정 수정
+                    'sed -i "s/# server_names_hash_bucket_size 64;/server_names_hash_bucket_size 64;/" /etc/nginx/nginx.conf',
+                    
+                    # 파일 권한 설정
+                    'chown -R ubuntu:ubuntu /home/ubuntu',
+                    'usermod -aG www-data ubuntu',
+                    
+                    # SSH 설정 개선
+                    'sed -i "s/#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config',
+                    'systemctl reload ssh',
+                    
+                    # 방화벽 설정 (기본 포트만 허용)
+                    'ufw --force enable',
+                    'ufw allow ssh',
+                    'ufw allow 80/tcp',
+                    'ufw allow 443/tcp',
+                    
+                    # 완료 로그
+                    f'echo "VM {vm_id} 설정 완료: $(date)" >> /var/log/webhoster-setup.log'
+                ],
+                'write_files': [
+                    {
+                        'path': '/etc/nginx/sites-available/default',
+                        'content': '''server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    
+    root /var/www/html;
+    index index.html index.htm index.nginx-debian.html;
+    
+    server_name _;
+    
+    location / {
+        try_files $uri $uri/ =404;
+    }
+    
+    # PHP 지원 (필요시)
+    # location ~ \\.php$ {
+    #     include snippets/fastcgi-php.conf;
+    #     fastcgi_pass unix:/var/run/php/php7.4-fpm.sock;
+    # }
+    
+    # 보안 설정
+    location ~ /\\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+}''',
+                        'permissions': '0644'
+                    }
+                ],
+                'final_message': f'VM {vm_id} 웹서버 설정이 완료되었습니다!'
+            }
+            
+            # YAML로 변환
+            user_data_yaml = yaml.dump(user_data, default_flow_style=False)
+            
+            # cloud-init 파일 생성
+            cloud_init_dir = self.image_path / "cloud-init" / vm_id
+            cloud_init_dir.mkdir(parents=True, exist_ok=True)
+            
+            # user-data 파일 저장
+            user_data_file = cloud_init_dir / "user-data"
+            with open(user_data_file, 'w') as f:
+                f.write(f"#cloud-config\\n{user_data_yaml}")
+            
+            # meta-data 파일 생성
+            meta_data = {
+                'instance-id': vm_id,
+                'local-hostname': vm_id
+            }
+            
+            meta_data_file = cloud_init_dir / "meta-data"
+            with open(meta_data_file, 'w') as f:
+                f.write(yaml.dump(meta_data, default_flow_style=False))
+            
+            # cloud-init ISO 이미지 생성
+            iso_path = cloud_init_dir / "cloud-init.iso"
+            subprocess.run([
+                "genisoimage", "-output", str(iso_path),
+                "-volid", "cidata", "-joliet", "-rock",
+                str(user_data_file), str(meta_data_file)
+            ], check=True, timeout=60)
+            
+            logger.info(f"cloud-init 설정 생성 완료: {iso_path}")
+            return str(iso_path)
+            
+        except Exception as e:
+            logger.error(f"cloud-init 설정 생성 실패: {e}")
+            raise VMOperationError(f"cloud-init 설정 생성 실패: {e}")
+    
     def create_vm_disk(self, vm_id: str, size_gb: int = 20) -> str:
         """
         VM 디스크 이미지 생성
@@ -94,12 +328,24 @@ class VMService:
             logger.error(f"예상치 못한 디스크 생성 오류: {e}")
             raise VMOperationError(f"VM 디스크 생성 중 오류가 발생했습니다: {e}")
     
-    def create_vm_xml(self, vm_id: str, disk_path: str, ssh_port: int, memory_mb: int = 1024, vcpus: int = 1) -> str:
+    def create_vm_xml(self, vm_id: str, disk_path: str, ssh_port: int, cloud_init_iso: str = None, memory_mb: int = 1024, vcpus: int = 1) -> str:
         """
-        VM XML 정의 생성
+        VM XML 정의 생성 (cloud-init 지원 추가)
         """
         # 기본 네트워크 인터페이스 MAC 주소 생성
         mac_address = self._generate_mac_address()
+        
+        # cloud-init ISO 디스크 추가
+        cloud_init_disk = ""
+        if cloud_init_iso and Path(cloud_init_iso).exists():
+            cloud_init_disk = f"""
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{cloud_init_iso}'/>
+      <target dev='hda' bus='ide'/>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>"""
         
         xml_template = f"""
 <domain type='kvm'>
@@ -111,6 +357,7 @@ class VMService:
   <os>
     <type arch='x86_64' machine='pc-i440fx-2.9'>hvm</type>
     <boot dev='hd'/>
+    <boot dev='cdrom'/>
   </os>
   <features>
     <acpi/>
@@ -132,7 +379,7 @@ class VMService:
       <source file='{disk_path}'/>
       <target dev='vda' bus='virtio'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
-    </disk>
+    </disk>{cloud_init_disk}
     <interface type='bridge'>
       <mac address='{mac_address}'/>
       <source bridge='{self.bridge_name}'/>
@@ -166,18 +413,27 @@ class VMService:
         import random
         return f"52:54:00:{random.randint(0,255):02x}:{random.randint(0,255):02x}:{random.randint(0,255):02x}"
     
-    def create_vm(self, vm_id: str, ssh_port: int) -> Dict[str, str]:
+    def create_vm(self, vm_id: str, ssh_port: int, user_id: str = None) -> Dict[str, str]:
         """
-        VM 생성 및 시작
+        VM 생성 및 시작 (웹서버 자동 설치 포함)
         """
         try:
             # 1. 디스크 이미지 생성
             disk_path = self.create_vm_disk(vm_id)
             
-            # 2. VM XML 정의 생성
-            vm_xml = self.create_vm_xml(vm_id, disk_path, ssh_port)
+            # 2. cloud-init 설정 생성 (웹서버 자동 설치)
+            cloud_init_iso = None
+            if user_id:
+                try:
+                    cloud_init_iso = self.create_cloud_init_config(vm_id, user_id)
+                    logger.info(f"cloud-init 설정 생성 완료: {cloud_init_iso}")
+                except Exception as e:
+                    logger.warning(f"cloud-init 설정 생성 실패, 기본 설정으로 진행: {e}")
             
-            # 3. VM 정의 등록
+            # 3. VM XML 정의 생성
+            vm_xml = self.create_vm_xml(vm_id, disk_path, ssh_port, cloud_init_iso)
+            
+            # 4. VM 정의 등록
             xml_file = f"/tmp/{vm_id}.xml"
             with open(xml_file, 'w') as f:
                 f.write(vm_xml)
@@ -187,12 +443,12 @@ class VMService:
                 "virsh", "define", xml_file
             ], check=True, timeout=30)
             
-            # 4. VM 시작
+            # 5. VM 시작
             subprocess.run([
                 "virsh", "start", vm_id
             ], check=True, timeout=30)
             
-            # 5. IP 주소 할당 대기 및 조회
+            # 6. IP 주소 할당 대기 및 조회
             vm_ip = self.get_vm_ip(vm_id)
             
             logger.info(f"VM 생성 완료: {vm_id}, IP: {vm_ip}")
@@ -201,6 +457,7 @@ class VMService:
                 "vm_id": vm_id,
                 "vm_ip": vm_ip,
                 "disk_path": disk_path,
+                "cloud_init_iso": cloud_init_iso,
                 "status": HostingStatus.RUNNING.value
             }
             
