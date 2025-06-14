@@ -41,7 +41,7 @@ class Hosting(BaseModel):
     @property
     def web_url(self):
         """웹 접속 URL 생성"""
-        return f"http://localhost/{self.user_id}-{self.id}"  # 다중 호스팅 지원을 위해 수정
+        return f"http://localhost/{self.user_id}"  # user_id만 사용하도록 수정
     
     @property
     def ssh_command(self):

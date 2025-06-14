@@ -48,8 +48,8 @@ class HostingDetail(HostingResponse):
     @field_validator('web_url', mode='before')
     @classmethod
     def set_web_url(cls, v, info):
-        if info.data and 'vm_id' in info.data:
-            return f"http://localhost/{info.data['vm_id']}"
+        if info.data and 'user_id' in info.data:
+            return f"http://localhost/{info.data['user_id']}"
         return v
     
     @field_validator('ssh_command', mode='before')
