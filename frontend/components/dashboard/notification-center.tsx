@@ -1,62 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Bell, Check, Info, AlertCircle, CheckCircle, XCircle, Trash2 } from "lucide-react"
 import { useNotificationStore } from "@/store/notification-store"
 import { cn } from "@/lib/utils"
-import type { Notification } from "@/types/notification"
 
 export function NotificationCenter() {
   const [open, setOpen] = useState(false)
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification, clearAll } = useNotificationStore()
-
-  // Mock notifications for demo
-  useEffect(() => {
-    const mockNotifications: Notification[] = [
-      {
-        id: "1",
-        title: "호스팅 생성 완료",
-        message: "새로운 호스팅 인스턴스가 성공적으로 생성되었습니다.",
-        type: "success",
-        read: false,
-        createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(), // 5분 전
-      },
-      {
-        id: "2",
-        title: "높은 CPU 사용량",
-        message: "인스턴스의 CPU 사용량이 높습니다 (85%).",
-        type: "warning",
-        read: false,
-        createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30분 전
-      },
-      {
-        id: "3",
-        title: "시스템 점검 예정",
-        message: "내일 오전 2시(UTC)에 시스템 점검이 예정되어 있습니다.",
-        type: "info",
-        read: true,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2시간 전
-      },
-      {
-        id: "4",
-        title: "결제 정보 업데이트",
-        message: "이번 달 청구서가 생성되었습니다.",
-        type: "info",
-        read: true,
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1일 전
-      },
-    ]
-
-    // Add mock notifications to the store
-    mockNotifications.forEach((notification) => {
-      if (!notifications.some((n) => n.id === notification.id)) {
-        useNotificationStore.getState().addNotification(notification)
-      }
-    })
-  }, [])
 
   const handleMarkAsRead = (id: string) => {
     markAsRead(id)
@@ -111,21 +65,29 @@ export function NotificationCenter() {
       <PopoverContent className="w-80 p-0" align="end">
         <div className="flex items-center justify-between p-4 border-b">
           <h3 className="font-medium">알림</h3>
-          <div className="flex gap-2">
-            {unreadCount > 0 && (
-              <Button variant="ghost" size="sm" onClick={markAllAsRead} className="h-8 px-2 text-xs">
-                <Check className="h-3.5 w-3.5 mr-1" />
-                모두 읽음
+          {notifications.length > 0 && (
+            <div className="flex gap-2">
+              {unreadCount > 0 && (
+                <Button variant="ghost" size="sm" onClick={markAllAsRead} className="h-8 px-2 text-xs">
+                  <Check className="h-3.5 w-3.5 mr-1" />
+                  모두 읽음
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={clearAll} className="h-8 px-2 text-xs">
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                모두 삭제
               </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={clearAll} className="h-8 px-2 text-xs">
-              <Trash2 className="h-3.5 w-3.5 mr-1" />
-              모두 삭제
-            </Button>
-          </div>
+            </div>
+          )}
         </div>
         {notifications.length === 0 ? (
-          <div className="p-4 text-center text-sm text-gray-500">알림이 없습니다</div>
+          <div className="p-8 text-center">
+            <Bell className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+            <p className="text-sm text-gray-500 dark:text-gray-400">새로운 알림이 없습니다</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+              호스팅 관련 알림이 여기에 표시됩니다
+            </p>
+          </div>
         ) : (
           <ScrollArea className="h-[300px]">
             <div className="divide-y">

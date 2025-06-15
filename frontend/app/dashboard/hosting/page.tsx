@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -18,10 +19,11 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Dialog, DialogTrigger } from "@/components/ui/dialog"
 import { useHosting } from "@/hooks/use-hosting"
-import { Server, Terminal, Trash2, Copy, ExternalLink, Plus, Loader2 } from "lucide-react"
+import { Server, Terminal, Trash2, Copy, ExternalLink, Plus, Loader2, CheckCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { CreateHostingDialog } from "@/components/dashboard/create-hosting-dialog"
 import { SSHInfoDialog } from "@/components/dashboard/ssh-info-dialog"
+import type { HostingInstance } from "@/types/hosting"
 
 const statusConfig = {
   creating: { label: "생성 중", color: "bg-blue-500", icon: Loader2 },
@@ -32,11 +34,15 @@ const statusConfig = {
 }
 
 export default function HostingPage() {
-  const { instances, isLoading, createInstance, deleteInstance } = useHosting()
+  const router = useRouter()
+  const { instances, isLoading, createInstance, deleteInstance, fetchInstances } = useHosting()
   const { showSuccess } = useToast()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [sshDialogOpen, setSshDialogOpen] = useState(false)
-  const [selectedInstance, setSelectedInstance] = useState<any>(null)
+  const [selectedInstance, setSelectedInstance] = useState<HostingInstance | null>(null)
+  // 호스팅 생성 후 로딩 상태 관리
+  const [isCreatingHosting, setIsCreatingHosting] = useState(false)
+  const [creationProgress, setCreationProgress] = useState(0)
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text)
@@ -45,9 +51,50 @@ export default function HostingPage() {
 
   const handleCreateHosting = async (data: any) => {
     try {
+      setIsCreatingHosting(true)
+      setCreationProgress(0)
+      
+      // 프로그레스 바 애니메이션 시작
+      const progressInterval = setInterval(() => {
+        setCreationProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return 90
+          }
+          return prev + 10
+        })
+      }, 1000)
+
       await createInstance(data)
       setCreateDialogOpen(false)
+      
+      // 생성 완료 후 진행률을 100%로 설정
+      setCreationProgress(100)
+      
+      // 10초 후 상태 리셋 및 데이터 재로드
+      setTimeout(async () => {
+        try {
+          setIsCreatingHosting(false)
+          setCreationProgress(0)
+          
+          // 데이터 다시 불러오기
+          await fetchInstances()
+          showSuccess("🎉 호스팅 인스턴스 생성이 완료되었습니다!")
+          
+        } catch (error) {
+          console.error("Failed to refresh data:", error)
+          
+          // 데이터 로드 실패 시 사용자에게 알림 후 대체 방법 시도
+          showSuccess("호스팅 생성이 완료되었습니다. 페이지를 새로고침합니다.")
+          
+          // Next.js 라우터의 refresh 사용 (안전한 새로고침)
+          router.refresh()
+        }
+      }, 10000)
+      
     } catch (error) {
+      setIsCreatingHosting(false)
+      setCreationProgress(0)
       // Error is handled in the hook
     }
   }
@@ -60,7 +107,7 @@ export default function HostingPage() {
     }
   }
 
-  const openSSHDialog = (instance: any) => {
+  const openSSHDialog = (instance: HostingInstance) => {
     setSelectedInstance(instance)
     setSshDialogOpen(true)
   }
@@ -72,6 +119,70 @@ export default function HostingPage() {
 
   const getSSHCommand = (instance: any) => {
     return instance.ssh_command || `ssh -p ${instance.ssh_port} user@${instance.vm_ip}`
+  }
+
+  // 호스팅 생성 중 로딩 화면
+  if (isCreatingHosting) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-lg mx-auto p-8">
+          <div className="mb-8">
+            <Loader2 className="mx-auto h-16 w-16 text-blue-500 animate-spin mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              호스팅 인스턴스 생성 중...
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400">
+              새로운 호스팅 환경을 준비하고 있습니다. 잠시만 기다려주세요.
+            </p>
+          </div>
+
+          {/* 프로그레스 바 */}
+          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
+            <div 
+              className="bg-blue-500 h-2 rounded-full transition-all duration-1000 ease-out"
+              style={{ width: `${creationProgress}%` }}
+            />
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            진행률: {creationProgress}%
+          </p>
+
+          {/* 생성 단계 표시 */}
+          <div className="space-y-3 text-left">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">가상 머신 할당 완료</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">운영체제 설치 완료</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {creationProgress >= 70 ? (
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              ) : (
+                <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />
+              )}
+              <span className="text-sm text-gray-700 dark:text-gray-300">웹 서버 설정 중...</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {creationProgress >= 90 ? (
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              ) : (
+                <div className="h-5 w-5 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+              )}
+              <span className="text-sm text-gray-700 dark:text-gray-300">최종 설정 중...</span>
+            </div>
+          </div>
+
+          <div className="mt-8 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              💡 생성이 완료되면 자동으로 "내 호스팅" 페이지로 이동합니다. (약 10초 소요)
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (isLoading && instances.length === 0) {
