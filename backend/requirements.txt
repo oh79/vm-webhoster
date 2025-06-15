@@ -8,6 +8,10 @@ asyncpg==0.29.0
 psycopg2-binary==2.9.9
 alembic==1.12.1
 
+# Redis 및 캐싱
+redis==5.0.1
+aioredis==2.0.1
+
 # 데이터 검증 및 설정
 pydantic[email]==2.5.0
 pydantic-settings==2.1.0

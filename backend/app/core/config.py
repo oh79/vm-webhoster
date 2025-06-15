@@ -4,11 +4,18 @@
 import os
 from functools import lru_cache
 from typing import List, Optional
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
 class Settings(BaseSettings):
     """애플리케이션 설정 클래스"""
+    
+    # 프로젝트 경로 설정
+    PROJECT_ROOT: str = Field(
+        default_factory=lambda: str(Path(__file__).parent.parent.parent.parent),
+        description="프로젝트 루트 디렉토리 경로"
+    )
     
     # 서버 설정
     HOST: str = Field(default="0.0.0.0", description="서버 호스트")
@@ -69,7 +76,7 @@ class Settings(BaseSettings):
     
     # SSH 포트 범위 설정
     SSH_PORT_RANGE_START: int = Field(default=10000, description="SSH 포트 범위 시작")
-    SSH_PORT_RANGE_END: int = Field(default=20000, description="SSH 포트 범위 끝")
+    SSH_PORT_RANGE_END: int = Field(default=10200, description="SSH 포트 범위 끝")
     
     # 개발 환경 설정
     DEBUG: bool = Field(default=True, description="디버그 모드")
