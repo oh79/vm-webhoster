@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Server, Globe, Shield, Activity, ExternalLink, Plus } from "lucide-react"
+import { Server, CheckCircle, ExternalLink, Plus } from "lucide-react"
 import Link from "next/link"
 import { useAuthStore } from "@/store/auth-store"
 import { useHosting } from "@/hooks/use-hosting"
@@ -14,22 +14,28 @@ export default function DashboardPage() {
   const { instances, isLoading } = useHosting()
   const [stats, setStats] = useState({
     activeInstances: 0,
-    totalVisits: "0",
-    uptime: "0%",
-    bandwidth: "0 GB",
+    serverStatus: "대기 중",
   })
 
   useEffect(() => {
     // Calculate stats based on instances
     if (!isLoading) {
       const activeCount = instances.filter((instance) => instance.status === "running").length
+      
+      // 첫 번째 인스턴스 기준으로 정보 계산
+      const firstInstance = instances[0]
+      let serverStatus = "대기 중"
 
-      // In a real app, these would come from your API
+      if (firstInstance) {
+        // 서버 상태
+        serverStatus = firstInstance.status === "running" ? "정상 운영" : 
+                     firstInstance.status === "creating" ? "생성 중" :
+                     firstInstance.status === "error" ? "오류 발생" : "중지됨"
+      }
+
       setStats({
         activeInstances: activeCount,
-        totalVisits: "2,847",
-        uptime: "99.9%",
-        bandwidth: "12.4 GB",
+        serverStatus: serverStatus,
       })
     }
   }, [instances, isLoading])
@@ -43,25 +49,13 @@ export default function DashboardPage() {
       color: "text-green-600",
     },
     {
-      title: "총 방문자",
-      value: stats.totalVisits,
-      description: "이번 달",
-      icon: Globe,
-      color: "text-blue-600",
-    },
-    {
-      title: "가동 시간",
-      value: stats.uptime,
-      description: "최근 30일",
-      icon: Shield,
-      color: "text-emerald-600",
-    },
-    {
-      title: "대역폭",
-      value: stats.bandwidth,
-      description: "이번 달 사용량",
-      icon: Activity,
-      color: "text-purple-600",
+      title: "서버 상태",
+      value: stats.serverStatus,
+      description: "현재 운영 상태",
+      icon: CheckCircle,
+      color: stats.serverStatus === "정상 운영" ? "text-emerald-600" : 
+             stats.serverStatus === "생성 중" ? "text-yellow-600" : 
+             stats.serverStatus === "오류 발생" ? "text-red-600" : "text-gray-600",
     },
   ]
 
@@ -75,8 +69,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[1, 2, 3, 4].map((i) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[1, 2].map((i) => (
             <Card key={i}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <Skeleton className="h-4 w-24" />
@@ -126,19 +120,19 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Stats Grid - 2개 카드로 더 크게 표시 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {statItems.map((item, index) => {
           const Icon = item.icon
           return (
-            <Card key={index}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{item.title}</CardTitle>
-                <Icon className={`h-4 w-4 ${item.color}`} />
+            <Card key={index} className="p-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+                <CardTitle className="text-base font-medium">{item.title}</CardTitle>
+                <Icon className={`h-6 w-6 ${item.color}`} />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{item.value}</div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{item.description}</p>
+                <div className="text-3xl font-bold mb-2">{item.value}</div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{item.description}</p>
               </CardContent>
             </Card>
           )
