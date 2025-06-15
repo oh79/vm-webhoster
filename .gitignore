@@ -22,6 +22,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+backend/vm-images/containers/
 # PyInstaller
 *.manifest
 *.spec

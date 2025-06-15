@@ -1,0 +1,111 @@
+# 사용자 {{ user_id }}의 웹 호스팅 설정
+# VM ID: {{ vm_id }}
+# 생성 시간: {{ creation_time if creation_time is defined else "자동 생성" }}
+
+# 사용자 {{ user_id }}번 웹 호스팅 프록시 설정
+location /{{ user_id }} {
+    # 경로 재작성 (/{{ user_id }}/path -> /path)
+    rewrite ^/{{ user_id }}(/.*)$ $1 break;
+    rewrite ^/{{ user_id }}$ / break;
+    
+    # VM의 웹포트로 프록시
+    proxy_pass http://{{ vm_ip }}:{{ web_port }};
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # 웹소켓 지원
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    
+    # 타임아웃 설정
+    proxy_connect_timeout {{ proxy_timeout if proxy_timeout is defined else 60 }}s;
+    proxy_send_timeout {{ proxy_timeout if proxy_timeout is defined else 60 }}s;
+    proxy_read_timeout {{ proxy_timeout if proxy_timeout is defined else 60 }}s;
+    
+    # 버퍼 설정
+    proxy_buffering on;
+    proxy_buffer_size 128k;
+    proxy_buffers 4 256k;
+    proxy_busy_buffers_size 256k;
+    
+    # 업로드 크기 제한
+    client_max_body_size {{ max_body_size if max_body_size is defined else "100M" }};
+    
+    {% if security_headers is not defined or security_headers %}
+    # 보안 헤더
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    {% endif %}
+    
+    {% if enable_logging is not defined or enable_logging %}
+    # 로깅 설정
+    access_log /var/log/nginx/hosting_{{ user_id }}.access.log;
+    error_log /var/log/nginx/hosting_{{ user_id }}.error.log;
+    {% endif %}
+    
+    # 에러 페이지 처리
+    proxy_intercept_errors on;
+    error_page 502 503 504 = @fallback_{{ user_id }};
+}
+
+# 정적 파일 캐싱 (사용자별)
+location ~ ^/{{ user_id }}/.*\.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg)$ {
+    rewrite ^/{{ user_id }}(/.*)$ $1 break;
+    proxy_pass http://{{ vm_ip }}:{{ web_port }};
+    proxy_set_header Host $host;
+    
+    # 캐싱 설정
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+    add_header Vary Accept-Encoding;
+}
+
+# 사용자 {{ user_id }} 폴백 (서비스가 없을 때)
+location @fallback_{{ user_id }} {
+    return 200 '
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>사용자 {{ user_id }} - 서비스 준비 중</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            padding: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container { 
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            max-width: 500px;
+        }
+        h1 { color: #f39c12; margin-bottom: 20px; }
+        .status { color: #e74c3c; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 사용자 {{ user_id }} 호스팅</h1>
+        <p class="status">VM이 시작 중입니다...</p>
+        <p>잠시 후 여기에 웹사이트가 표시됩니다.</p>
+        <p><a href="/" style="color: #f39c12;">메인 페이지로 돌아가기</a></p>
+    </div>
+</body>
+</html>';
+    add_header Content-Type "text/html; charset=utf-8";
+}
+
+# SSH 포트 정보 (주석)
+# SSH 접속: ssh -p {{ ssh_port }} ubuntu@{{ vm_ip if vm_ip != '127.0.0.1' else 'localhost' }} 

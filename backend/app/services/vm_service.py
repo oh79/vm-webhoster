@@ -763,7 +763,7 @@ maxretry = 6
     
     def create_vm(self, vm_id: str, ssh_port: int, user_id: str = None) -> Dict[str, str]:
         """
-        Docker 컨테이너 기반 웹 호스팅 생성 (실제 구현)
+        Docker 컨테이너 기반 웹 호스팅 생성 (실제 구현 - 개선된 버전)
         """
         try:
             logger.info(f"Docker 컨테이너 생성 시작: {vm_id}")
@@ -851,6 +851,18 @@ maxretry = 6
             
             container_id = result.stdout.strip()
             
+            # 컨테이너 시작 대기 (최대 30초)
+            logger.info(f"컨테이너 시작 대기 중: {container_name}")
+            for i in range(30):
+                time.sleep(1)
+                status_cmd = ["docker", "inspect", "-f", "{{.State.Running}}", container_name]
+                status_result = subprocess.run(status_cmd, capture_output=True, text=True, timeout=10)
+                if status_result.returncode == 0 and status_result.stdout.strip() == "true":
+                    logger.info(f"컨테이너 시작 완료: {container_name}")
+                    break
+            else:
+                logger.warning(f"컨테이너 시작 확인 시간 초과: {container_name}")
+            
             # nginx 설정을 올바른 웹 디렉토리로 수정 (nginx:alpine 컨테이너 대응)
             nginx_config_cmd = [
                 "docker", "exec", container_name,
@@ -869,21 +881,21 @@ maxretry = 6
             else:
                 logger.warning(f"컨테이너 {container_name}의 nginx 설정 변경 실패: {config_result.stderr}")
             
-            # 컨테이너 IP 조회
-            ip_cmd = ["docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name]
-            ip_result = subprocess.run(ip_cmd, capture_output=True, text=True, timeout=30)
+            # 실제 컨테이너 정보 조회 (개선된 버전)
+            vm_ip, actual_web_port = self._get_container_network_info(container_name, web_port)
             
-            if ip_result.returncode == 0 and ip_result.stdout.strip():
-                vm_ip = ip_result.stdout.strip()
+            # 연결 테스트 수행
+            if self._test_container_connection(vm_ip, actual_web_port):
+                logger.info(f"컨테이너 연결 테스트 성공: {vm_ip}:{actual_web_port}")
             else:
-                vm_ip = "127.0.0.1"  # 로컬호스트로 폴백
+                logger.warning(f"컨테이너 연결 테스트 실패, 기본값 사용: {vm_ip}:{actual_web_port}")
             
-            logger.info(f"Docker 컨테이너 생성 완료: {container_name}, 웹포트: {web_port}, SSH포트: {ssh_port}")
+            logger.info(f"Docker 컨테이너 생성 완료: {container_name}, IP: {vm_ip}, 웹포트: {actual_web_port}, SSH포트: {ssh_port}")
             
             return {
                 "vm_id": vm_id,
                 "vm_ip": vm_ip,
-                "web_port": web_port,
+                "web_port": actual_web_port,
                 "ssh_port": ssh_port,
                 "container_name": container_name,
                 "container_id": container_id,
@@ -897,6 +909,83 @@ maxretry = 6
         except Exception as e:
             logger.error(f"예상치 못한 컨테이너 생성 오류: {e}")
             raise VMOperationError(f"웹 호스팅 생성 중 오류가 발생했습니다: {e}")
+    
+    def _get_container_network_info(self, container_name: str, expected_web_port: int) -> tuple[str, int]:
+        """
+        컨테이너의 실제 네트워크 정보 조회 (개선된 버전)
+        
+        Returns:
+            tuple: (vm_ip, actual_web_port)
+        """
+        try:
+            # 컨테이너 IP 조회
+            ip_cmd = ["docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name]
+            ip_result = subprocess.run(ip_cmd, capture_output=True, text=True, timeout=30)
+            
+            if ip_result.returncode == 0 and ip_result.stdout.strip():
+                vm_ip = ip_result.stdout.strip()
+                logger.info(f"컨테이너 실제 IP 조회 성공: {vm_ip}")
+            else:
+                vm_ip = "127.0.0.1"  # 로컬호스트로 폴백
+                logger.warning(f"컨테이너 IP 조회 실패, 기본값 사용: {vm_ip}")
+            
+            # 포트 매핑 정보 조회
+            port_cmd = ["docker", "port", container_name, "80"]
+            port_result = subprocess.run(port_cmd, capture_output=True, text=True, timeout=30)
+            
+            actual_web_port = expected_web_port  # 기본값
+            if port_result.returncode == 0 and port_result.stdout.strip():
+                # 출력 예: "0.0.0.0:8295"
+                port_mapping = port_result.stdout.strip()
+                if ":" in port_mapping:
+                    mapped_port = port_mapping.split(":")[-1]
+                    try:
+                        actual_web_port = int(mapped_port)
+                        logger.info(f"컨테이너 실제 웹 포트 조회 성공: {actual_web_port}")
+                    except ValueError:
+                        logger.warning(f"포트 파싱 실패, 기본값 사용: {expected_web_port}")
+            else:
+                logger.warning(f"컨테이너 포트 매핑 조회 실패, 기본값 사용: {expected_web_port}")
+            
+            # 컨테이너 내부 포트는 항상 80이므로, 프록시 설정에서는 80 사용
+            return vm_ip, 80
+            
+        except Exception as e:
+            logger.error(f"컨테이너 네트워크 정보 조회 실패: {e}")
+            return "127.0.0.1", 80
+    
+    def _test_container_connection(self, vm_ip: str, web_port: int, timeout: int = 10) -> bool:
+        """
+        컨테이너 연결 테스트
+        
+        Args:
+            vm_ip: 컨테이너 IP
+            web_port: 웹 포트
+            timeout: 타임아웃 (초)
+        
+        Returns:
+            연결 성공 여부
+        """
+        try:
+            import socket
+            
+            # TCP 소켓 연결 테스트
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            
+            result = sock.connect_ex((vm_ip, web_port))
+            sock.close()
+            
+            if result == 0:
+                logger.info(f"컨테이너 연결 테스트 성공: {vm_ip}:{web_port}")
+                return True
+            else:
+                logger.warning(f"컨테이너 연결 테스트 실패: {vm_ip}:{web_port} (코드: {result})")
+                return False
+                
+        except Exception as e:
+            logger.error(f"컨테이너 연결 테스트 오류: {e}")
+            return False
     
     def get_vm_ip(self, vm_id: str, timeout: int = 60) -> str:
         """

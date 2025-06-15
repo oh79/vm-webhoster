@@ -92,12 +92,6 @@ while [[ $# -gt 0 ]]; do
             COMMAND="$1"
             shift
             ;;
-        [0-9]*)
-            if [[ -z "$USER_ID" ]]; then
-                USER_ID="$1"
-            fi
-            shift
-            ;;
         --vm-id)
             VM_ID="$2"
             shift 2
@@ -131,9 +125,15 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         *)
-            log_error "알 수 없는 옵션: $1"
-            print_help
-            exit 1
+            # 명령어가 설정된 후 첫 번째 인수는 사용자 ID로 처리
+            if [[ -n "$COMMAND" && -z "$USER_ID" && ! "$1" =~ ^-- ]]; then
+                USER_ID="$1"
+                shift
+            else
+                log_error "알 수 없는 옵션: $1"
+                print_help
+                exit 1
+            fi
             ;;
     esac
 done
@@ -203,6 +203,7 @@ add_user_config() {
     fi
     
     local config_file="$HOSTING_DIR/${user_id}.conf"
+    local main_config_file="$NGINX_DIR/sites-available/main.conf"
     
     # 기존 설정 확인
     if [[ -f "$config_file" && "$FORCE" != true ]]; then
@@ -210,9 +211,14 @@ add_user_config() {
         return 1
     fi
     
-    log_info "사용자 $user_id 호스팅 설정 생성 중..."
+    log_info "사용자 $user_id 호스팅 설정 생성 중... (IP: $VM_IP, 웹포트: $WEB_PORT)"
     
     if [[ "$DRY_RUN" == false ]]; then
+        # 컨테이너 연결 사전 테스트
+        if ! test_container_connection "$VM_IP" "$WEB_PORT"; then
+            log_warning "컨테이너 연결 테스트 실패: $VM_IP:$WEB_PORT, 계속 진행..."
+        fi
+        
         # 템플릿을 사용하여 설정 파일 생성
         python3 -c "
 import jinja2
@@ -237,10 +243,138 @@ with open('$config_file', 'w') as f:
         # 권한 설정
         chmod 644 "$config_file"
         
-        log_success "사용자 $user_id 설정 생성 완료: $config_file"
+        # main.conf에 include 추가 (중복 체크)
+        if ! grep -q "include $HOSTING_DIR/\*.conf;" "$main_config_file" 2>/dev/null; then
+            # main.conf의 server 블록 끝 부분에 include 추가
+            sed -i '/# 사용자별 호스팅 사이트 설정/i\\n    # 동적 사용자 호스팅 include\n    include '"$HOSTING_DIR"'/*.conf;\n' "$main_config_file"
+        fi
+        
+        # 설정 검증
+        if validate_config; then
+            log_success "사용자 $user_id 설정 생성 및 검증 완료: $config_file"
+            
+            # nginx 리로드
+            if systemctl reload nginx 2>/dev/null; then
+                log_success "nginx 리로드 완료"
+                
+                # 실시간 검증 (최대 30초 대기)
+                log_info "프록시 규칙 동작 검증 중..."
+                if verify_proxy_rule "$user_id" "$VM_IP" "$WEB_PORT"; then
+                    log_success "프록시 규칙 검증 성공: 사용자 $user_id"
+                else
+                    log_warning "프록시 규칙 검증 실패: 사용자 $user_id"
+                    # 자동 수정 시도
+                    if auto_fix_config "$user_id" "$VM_IP" "$WEB_PORT"; then
+                        log_success "설정 자동 수정 완료: 사용자 $user_id"
+                    else
+                        log_error "설정 자동 수정 실패: 사용자 $user_id"
+                    fi
+                fi
+            else
+                log_error "nginx 리로드 실패"
+                return 1
+            fi
+        else
+            log_error "nginx 설정 검증 실패"
+            return 1
+        fi
     else
         log_info "[DRY RUN] 사용자 $user_id 설정 파일이 생성될 예정: $config_file"
     fi
+}
+
+# 컨테이너 연결 테스트
+test_container_connection() {
+    local vm_ip="$1"
+    local web_port="$2"
+    local timeout=5
+    
+    if command -v nc >/dev/null 2>&1; then
+        # netcat 사용
+        if timeout "$timeout" nc -z "$vm_ip" "$web_port" 2>/dev/null; then
+            log_info "컨테이너 연결 테스트 성공: $vm_ip:$web_port"
+            return 0
+        else
+            log_warning "컨테이너 연결 테스트 실패: $vm_ip:$web_port"
+            return 1
+        fi
+    else
+        # curl 사용 (대체 방법)
+        if timeout "$timeout" curl -s --connect-timeout "$timeout" "http://$vm_ip:$web_port" >/dev/null 2>&1; then
+            log_info "컨테이너 연결 테스트 성공: $vm_ip:$web_port"
+            return 0
+        else
+            log_warning "컨테이너 연결 테스트 실패: $vm_ip:$web_port"
+            return 1
+        fi
+    fi
+}
+
+# 프록시 규칙 동작 검증
+verify_proxy_rule() {
+    local user_id="$1"
+    local vm_ip="$2"
+    local web_port="$3"
+    local max_attempts=30
+    
+    for ((i=1; i<=max_attempts; i++)); do
+        if curl -s --connect-timeout 3 --max-time 10 "http://localhost/$user_id" >/dev/null 2>&1; then
+            log_info "프록시 규칙 검증 성공: /localhost/$user_id (시도 $i/$max_attempts)"
+            return 0
+        fi
+        
+        if [[ $i -lt $max_attempts ]]; then
+            sleep 1
+        fi
+    done
+    
+    log_warning "프록시 규칙 검증 실패: /localhost/$user_id ($max_attempts회 시도)"
+    return 1
+}
+
+# 설정 자동 수정
+auto_fix_config() {
+    local user_id="$1"
+    local vm_ip="$2"
+    local web_port="$3"
+    
+    log_info "설정 자동 수정 시작: 사용자 $user_id"
+    
+    # 실제 컨테이너 정보 재조회
+    local actual_ip
+    local actual_port
+    
+    if command -v docker >/dev/null 2>&1; then
+        # Docker 컨테이너에서 실제 IP 조회
+        local container_name="webhost-vm-${user_id}"
+        actual_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_name" 2>/dev/null)
+        
+        if [[ -n "$actual_ip" && "$actual_ip" != "$vm_ip" ]]; then
+            log_info "실제 컨테이너 IP 발견: $actual_ip (기존: $vm_ip)"
+            
+            # 설정 파일에서 IP 주소 수정
+            local config_file="$HOSTING_DIR/${user_id}.conf"
+            if [[ -f "$config_file" ]]; then
+                sed -i "s|proxy_pass http://$vm_ip:|proxy_pass http://$actual_ip:|g" "$config_file"
+                log_info "설정 파일 IP 주소 수정: $vm_ip -> $actual_ip"
+                
+                # nginx 리로드
+                if systemctl reload nginx 2>/dev/null; then
+                    log_info "nginx 리로드 완료"
+                    
+                    # 수정 후 재검증
+                    sleep 3
+                    if verify_proxy_rule "$user_id" "$actual_ip" "$web_port"; then
+                        log_success "자동 수정 후 검증 성공: 사용자 $user_id"
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+    fi
+    
+    log_error "설정 자동 수정 실패: 사용자 $user_id"
+    return 1
 }
 
 # 사용자 호스팅 설정 제거
