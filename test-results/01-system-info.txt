@@ -1,0 +1,35 @@
+====================================================
+VM 웹호스터 시스템 정보 - Sun Jun 15 06:40:24 UTC 2025
+====================================================
+
+운영체제 정보:
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=jammy
+
+하드웨어 정보:
+CPU: Intel Xeon Processor (Icelake)
+메모리: 15Gi
+디스크: 20G
+
+네트워크 정보:
+IP 주소: 10.0.10.174
+호스트명: vmwh
+
+설치된 주요 소프트웨어:
+Docker: Docker version 28.2.2, build e6534b4
+Node.js: v18.20.8
+Python: Python 3.10.12
+PostgreSQL: psql (PostgreSQL) 14.18 (Ubuntu 14.18-0ubuntu0.22.04.1)
+Redis: Redis server v=6.0.16 sha=00000000:0 malloc=jemalloc-5.2.1 bits=64 build=a3fdef44459b3ad6
+
+====================================================

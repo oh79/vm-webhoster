@@ -42,7 +42,7 @@ export function CreateHostingDialog({ onSubmit }: CreateHostingDialogProps) {
           <ul className="text-sm space-y-2">
             <li className="flex items-center gap-2">
               <CheckCircle className="h-3 w-3 text-green-500" />
-              Ubuntu 20.04 LTS 운영체제
+              Ubuntu 22.04 LTS 운영체제
             </li>
             <li className="flex items-center gap-2">
               <CheckCircle className="h-3 w-3 text-green-500" />
