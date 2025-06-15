@@ -47,8 +47,13 @@ export default function LoginPage() {
       showSuccess("로그인 성공!")
       router.push("/dashboard")
     } catch (error: any) {
-      const message = error.response?.data?.message || "로그인에 실패했습니다. 다시 시도해주세요."
+      const message = error.response?.data?.detail || 
+                     error.response?.data?.message || 
+                     "로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요."
       showError(message)
+      
+      // 비밀번호 필드만 포커스 (보안상 비밀번호는 지우지 않음)
+      // form.setFocus("password")
     } finally {
       setIsLoading(false)
     }

@@ -51,15 +51,31 @@ CREATE INDEX IF NOT EXISTS idx_hosting_vm_id ON hosting(vm_id);
 CREATE INDEX IF NOT EXISTS idx_hosting_status ON hosting(status);
 CREATE INDEX IF NOT EXISTS idx_hosting_ssh_port ON hosting(ssh_port);
 
--- 상태 값 제약 조건 추가
-ALTER TABLE hosting 
-ADD CONSTRAINT IF NOT EXISTS chk_hosting_status 
-CHECK (status IN ('creating', 'running', 'stopping', 'stopped', 'error'));
+-- 상태 값 제약 조건 추가 (PostgreSQL 14 호환)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'chk_hosting_status'
+    ) THEN
+        ALTER TABLE hosting 
+        ADD CONSTRAINT chk_hosting_status 
+        CHECK (status IN ('creating', 'running', 'stopping', 'stopped', 'error'));
+    END IF;
+END $$;
 
--- SSH 포트 범위 제약 조건
-ALTER TABLE hosting 
-ADD CONSTRAINT IF NOT EXISTS chk_hosting_ssh_port 
-CHECK (ssh_port >= 10000 AND ssh_port <= 20000);
+-- SSH 포트 범위 제약 조건 (PostgreSQL 14 호환)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'chk_hosting_ssh_port'
+    ) THEN
+        ALTER TABLE hosting 
+        ADD CONSTRAINT chk_hosting_ssh_port 
+        CHECK (ssh_port >= 10000 AND ssh_port <= 20000);
+    END IF;
+END $$;
 
 -- 테이블 업데이트 트리거 함수 생성
 CREATE OR REPLACE FUNCTION update_updated_at_column()

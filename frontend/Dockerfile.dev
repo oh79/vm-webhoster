@@ -2,11 +2,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# package.json과 package-lock.json 복사
-COPY package*.json ./
+# package.json 복사
+COPY package.json ./
 
-# 의존성 설치
-RUN npm ci
+# 의존성 설치 (package-lock.json 없이 설치)
+RUN npm install --legacy-peer-deps
 
 # 소스 코드 복사
 COPY . .

@@ -1,0 +1,53 @@
+====================================================
+성능 테스트 결과 - Sun Jun 15 06:41:03 UTC 2025
+====================================================
+
+시스템 리소스 사용량:
+CPU 사용률:
+%Cpu(s):  0.7 us,  2.1 sy,  0.0 ni, 97.1 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st
+
+메모리 사용량:
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       3.9Gi       6.2Gi        20Mi       5.6Gi        11Gi
+Swap:             0B          0B          0B
+
+디스크 사용량:
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           1.6G  5.7M  1.6G   1% /run
+/dev/vda1        20G  5.7G   14G  30% /
+tmpfs           7.9G   28K  7.9G   1% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+/dev/vda15      105M  6.1M   99M   6% /boot/efi
+tmpfs           1.6G  8.0K  1.6G   1% /run/user/1000
+tmpfs           7.9G     0  7.9G   0% /run/qemu
+
+네트워크 연결 상태:
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:8809            0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.1:40627         0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8779            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8781            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8774            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8790            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8750            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8931            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8953            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8878            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8882            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8853            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8964            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8989            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8290            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8295            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8319            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8306            0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:8271            0.0.0.0:*               LISTEN     
+
+API 응답 시간 테스트:
+테스트 1: 9ms
+테스트 2: 9ms
+테스트 3: 8ms
+테스트 4: 9ms
+테스트 5: 8ms
+
+====================================================

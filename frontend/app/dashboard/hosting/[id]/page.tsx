@@ -43,8 +43,12 @@ export default function HostingDetailPage() {
   const fetchInstance = async () => {
     setIsLoading(true)
     try {
-      const { instance } = await hostingApi.getById(id)
-      setInstance(instance)
+      const response = await hostingApi.getById(id)
+      if (response.success && response.data) {
+        setInstance(response.data)
+      } else {
+        throw new Error("Failed to load instance")
+      }
     } catch (error: any) {
       showError("Failed to load hosting instance")
       router.push("/dashboard/hosting")
@@ -56,9 +60,13 @@ export default function HostingDetailPage() {
   const refreshInstance = async () => {
     setIsRefreshing(true)
     try {
-      const { instance } = await hostingApi.getById(id)
-      setInstance(instance)
-      showSuccess("Instance status refreshed")
+      const response = await hostingApi.getById(id)
+      if (response.success && response.data) {
+        setInstance(response.data)
+        showSuccess("Instance status refreshed")
+      } else {
+        throw new Error("Failed to refresh instance")
+      }
     } catch (error) {
       showError("Failed to refresh instance status")
     } finally {
@@ -128,7 +136,7 @@ export default function HostingDetailPage() {
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-          <h1 className="text-2xl font-bold">VM-{instance.vmId}</h1>
+          <h1 className="text-2xl font-bold">VM-{instance.vm_id}</h1>
           <Badge variant="secondary" className="flex items-center gap-1">
             <div className={`w-2 h-2 rounded-full ${status.color}`} />
             {status.label}
@@ -152,7 +160,7 @@ export default function HostingDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => window.open(instance.webUrl, "_blank")}
+            onClick={() => window.open(instance.web_url || `http://localhost/${instance.user_id}`, "_blank")}
             disabled={instance.status !== "running"}
           >
             <ExternalLink className="mr-2 h-4 w-4" />
@@ -180,8 +188,14 @@ export default function HostingDetailPage() {
             <div>
               <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Web URL</h3>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded text-sm">{instance.webUrl}</code>
-                <Button size="sm" variant="outline" onClick={() => copyToClipboard(instance.webUrl, "Web URL")}>
+                <code className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded text-sm">
+                  {instance.web_url || `http://localhost/${instance.user_id}`}
+                </code>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => copyToClipboard(instance.web_url || `http://localhost/${instance.user_id}`, "Web URL")}
+                >
                   <Copy className="h-4 w-4" />
                 </Button>
               </div>
@@ -191,12 +205,12 @@ export default function HostingDetailPage() {
               <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">SSH Connection</h3>
               <div className="flex items-center gap-2">
                 <code className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded text-sm">
-                  {instance.sshInfo.username}@{instance.sshInfo.host}
+                  {instance.ssh_command || `ssh -p ${instance.ssh_port} ubuntu@localhost`}
                 </code>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => copyToClipboard(`${instance.sshInfo.username}@${instance.sshInfo.host}`, "SSH Info")}
+                  onClick={() => copyToClipboard(instance.ssh_command || `ssh -p ${instance.ssh_port} ubuntu@localhost`, "SSH Info")}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -205,12 +219,12 @@ export default function HostingDetailPage() {
 
             <div>
               <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Created</h3>
-              <p>{new Date(instance.createdAt).toLocaleString()}</p>
+              <p>{new Date(instance.created_at).toLocaleString()}</p>
             </div>
 
             <div>
-              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Last Updated</h3>
-              <p>{new Date(instance.updatedAt).toLocaleString()}</p>
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">VM IP</h3>
+              <p>{instance.vm_ip}</p>
             </div>
           </div>
         </CardContent>

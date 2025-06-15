@@ -348,3 +348,166 @@ graph TD
 - ✅ 확장 가능한 아키텍처
 
 **지금 바로 `./scripts/docker-start.sh`로 시작해보세요!**
+
+# 웹 호스팅 서비스 (로컬 개발 환경)
+
+Ubuntu 기반 웹 호스팅 서비스의 로컬 개발 환경입니다.
+
+## 🚀 빠른 시작
+
+### 1. 환경 설치
+```bash
+# 로컬 개발 환경 설치 (15-20분 소요)
+chmod +x scripts/00-setup-all.sh
+./scripts/00-setup-all.sh
+```
+
+### 2. 서비스 실행
+```bash
+# 모든 서비스 실행
+./scripts/start-all.sh
+
+# 또는 개별 실행
+./scripts/start-backend.sh    # 백엔드만 실행
+./scripts/start-frontend.sh   # 프론트엔드만 실행
+```
+
+### 3. 서비스 접속
+- **프론트엔드**: http://localhost:3000
+- **백엔드 API**: http://localhost:8000
+- **API 문서**: http://localhost:8000/docs
+
+## 📋 포트 관리
+
+### 필수 포트
+- `3000`: 프론트엔드 (Next.js)
+- `8000`: 백엔드 API (FastAPI)
+- `5432`: PostgreSQL 데이터베이스
+- `6379`: Redis 캐시
+
+### VM 호스팅용 포트 (필요시만)
+- `10022-10032`: SSH 포트 (최대 10개 VM)
+- `8080-8090`: HTTP 포트 (최대 10개 웹사이트)
+
+### 포트 관리 명령어
+```bash
+# 현재 포트 상태 확인
+./scripts/manage-ports.sh status
+
+# 불필요한 포트 정리
+./scripts/manage-ports.sh clean
+
+# 필요한 포트 목록 보기
+./scripts/manage-ports.sh list
+```
+
+### VS Code 포트 포워딩 설정
+VS Code가 자동으로 포트를 포워딩하는 것을 방지하기 위해 `.vscode/settings.json`에서 설정을 관리합니다:
+- 필수 포트(3000, 8000)만 알림으로 포워딩
+- 내부 서비스 포트(5432, 6379)는 무시
+- 기타 모든 포트는 자동 포워딩 비활성화
+
+## 🛠️ 개발 환경
+
+### 기술 스택
+- **프론트엔드**: Next.js 14, TypeScript, Tailwind CSS
+- **백엔드**: FastAPI, Python 3.11, SQLAlchemy
+- **데이터베이스**: PostgreSQL, Redis
+- **가상화**: KVM/QEMU, libvirt
+
+### 디렉토리 구조
+```
+vm-webhoster/
+├── frontend/          # Next.js 프론트엔드
+├── backend/           # FastAPI 백엔드
+├── scripts/           # 관리 스크립트
+├── nginx/             # Nginx 설정
+├── logs/              # 로그 파일
+└── .vscode/           # VS Code 설정
+```
+
+## 🔧 서비스 관리
+
+### 서비스 시작/중지
+```bash
+./scripts/start-all.sh     # 모든 서비스 시작
+./scripts/stop-all.sh      # 모든 서비스 중지
+```
+
+### 로그 확인
+```bash
+# 백엔드 로그
+tail -f logs/backend.log
+
+# 실시간 로그 (서비스 실행 중)
+journalctl -f -u postgresql
+journalctl -f -u redis-server
+```
+
+### 데이터베이스 관리
+```bash
+# PostgreSQL 접속
+psql -h localhost -U webhoster_user -d webhoster_db
+
+# Redis 접속
+redis-cli
+
+# 데이터베이스 마이그레이션
+cd backend
+source venv/bin/activate
+python -m alembic upgrade head
+```
+
+## 🐛 문제 해결
+
+### 포트 충돌 문제
+```bash
+# 포트 사용 현황 확인
+./scripts/manage-ports.sh status
+
+# 불필요한 프로세스 정리
+./scripts/manage-ports.sh clean
+```
+
+### 권한 문제 (libvirt)
+```bash
+# 그룹 권한 적용
+newgrp libvirt
+
+# 또는 재부팅
+sudo reboot
+```
+
+### 서비스 재시작
+```bash
+# 개별 서비스 재시작
+sudo systemctl restart postgresql
+sudo systemctl restart redis-server
+sudo systemctl restart nginx
+```
+
+## 📚 개발 가이드
+
+### API 개발
+- FastAPI 자동 문서: http://localhost:8000/docs
+- 스키마 정의: `backend/app/schemas/`
+- 엔드포인트: `backend/app/api/endpoints/`
+
+### 프론트엔드 개발
+- 컴포넌트: `frontend/components/`
+- 페이지: `frontend/app/`
+- 스타일: `frontend/styles/`
+
+### 환경 변수
+- 로컬 설정: `local.env`
+- 운영용 설정: `.env` (자동 생성)
+
+## 🔒 보안 주의사항
+
+- `local.env`의 비밀키들은 개발용이므로 운영환경에서 변경 필수
+- PostgreSQL 및 Redis는 로컬호스트에서만 접근 가능
+- VM 호스팅 포트는 필요시에만 개방
+
+## 📝 라이센스
+
+MIT License - 자세한 내용은 LICENSE 파일 참조

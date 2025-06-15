@@ -7,9 +7,9 @@ interface HostingState {
   error: string | null
   setInstances: (instances: HostingInstance[]) => void
   addInstance: (instance: HostingInstance) => void
-  updateInstance: (id: string, updates: Partial<HostingInstance>) => void
-  removeInstance: (id: string) => void
-  setLoading: (loading: boolean) => void
+  updateInstance: (id: number, updates: Partial<HostingInstance>) => void
+  removeInstance: (id: number) => void
+  setLoading: (isLoading: boolean) => void
   setError: (error: string | null) => void
 }
 

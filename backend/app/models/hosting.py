@@ -18,8 +18,11 @@ class Hosting(BaseModel):
     """호스팅 모델"""
     __tablename__ = "hosting"
     
-    # 사용자 관계 (1:1)
-    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    # 사용자 관계 (1:N으로 변경 - 다중 호스팅 지원)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    # 호스팅 이름 (사용자가 지정 가능)
+    name = Column(String(100), nullable=False, index=True)
     
     # VM 정보
     vm_id = Column(String(100), unique=True, nullable=False, index=True)
@@ -33,12 +36,12 @@ class Hosting(BaseModel):
     user = relationship("User", back_populates="hosting")
     
     def __repr__(self):
-        return f"<Hosting(id={self.id}, user_id={self.user_id}, vm_id='{self.vm_id}', status='{self.status.value}')>"
+        return f"<Hosting(id={self.id}, name='{self.name}', user_id={self.user_id}, vm_id='{self.vm_id}', status='{self.status.value}')>"
     
     @property
     def web_url(self):
         """웹 접속 URL 생성"""
-        return f"http://localhost/{self.vm_id}"
+        return f"http://localhost/{self.user_id}"  # user_id만 사용하도록 수정
     
     @property
     def ssh_command(self):

@@ -1,0 +1,38 @@
+====================================================
+데이터베이스 테스트 결과 - Sun Jun 15 06:41:03 UTC 2025
+====================================================
+
+PostgreSQL 연결 테스트:
+데이터베이스 URL: postgresql://webhoster_user:webhoster_pass@localhost:5432/webhoster_db
+                                                                version                                                                 
+----------------------------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 14.18 (Ubuntu 14.18-0ubuntu0.22.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0, 64-bit
+(1 row)
+
+✅ PostgreSQL 연결 성공
+
+테이블 목록:
+             List of relations
+ Schema |  Name   | Type  |     Owner      
+--------+---------+-------+----------------
+ public | hosting | table | webhoster_user
+ public | users   | table | webhoster_user
+(2 rows)
+
+
+Redis 연결 테스트:
+✅ Redis 연결 성공: PONG
+
+Redis 정보:
+# Server
+redis_version:6.0.16
+redis_git_sha1:00000000
+redis_git_dirty:0
+redis_build_id:a3fdef44459b3ad6
+redis_mode:standalone
+os:Linux 5.15.0-134-generic x86_64
+arch_bits:64
+multiplexing_api:epoll
+atomicvar_api:atomic-builtin
+
+====================================================

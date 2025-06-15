@@ -1,6 +1,7 @@
 export interface HostingInstance {
   id: number
   user_id: number
+  name: string
   vm_id: string
   vm_ip: string
   ssh_port: number

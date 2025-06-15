@@ -26,21 +26,21 @@ import {
 } from "@/components/ui/alert-dialog"
 
 const profileSchema = z.object({
-  username: z.string().min(3, "Username must be at least 3 characters"),
-  email: z.string().email("Please enter a valid email address"),
+  username: z.string().min(3, "사용자명은 최소 3자 이상이어야 합니다"),
+  email: z.string().email("올바른 이메일 주소를 입력해주세요"),
 })
 
 const passwordSchema = z
   .object({
-    currentPassword: z.string().min(1, "Current password is required"),
+    currentPassword: z.string().min(1, "현재 비밀번호를 입력해주세요"),
     newPassword: z
       .string()
-      .min(8, "Password must be at least 8 characters")
-      .regex(/^(?=.*[a-zA-Z])(?=.*\d)/, "Password must contain both letters and numbers"),
+      .min(8, "비밀번호는 최소 8자 이상이어야 합니다")
+      .regex(/^(?=.*[a-zA-Z])(?=.*\d)/, "비밀번호는 영문과 숫자를 모두 포함해야 합니다"),
     confirmPassword: z.string(),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
-    message: "Passwords don't match",
+    message: "비밀번호가 일치하지 않습니다",
     path: ["confirmPassword"],
   })
 
@@ -75,9 +75,9 @@ export default function SettingsPage() {
     try {
       const response = await api.patch("/auth/profile", data)
       setAuth(response.data.user, useAuthStore.getState().token!)
-      showSuccess("Profile updated successfully!")
+      showSuccess("프로필이 성공적으로 업데이트되었습니다!")
     } catch (error: any) {
-      const message = error.response?.data?.message || "Failed to update profile"
+      const message = error.response?.data?.message || "프로필 업데이트에 실패했습니다"
       showError(message)
     } finally {
       setIsUpdatingProfile(false)
@@ -92,9 +92,9 @@ export default function SettingsPage() {
         newPassword: data.newPassword,
       })
       passwordForm.reset()
-      showSuccess("Password updated successfully!")
+      showSuccess("비밀번호가 성공적으로 변경되었습니다!")
     } catch (error: any) {
-      const message = error.response?.data?.message || "Failed to update password"
+      const message = error.response?.data?.message || "비밀번호 변경에 실패했습니다"
       showError(message)
     } finally {
       setIsUpdatingPassword(false)
@@ -105,9 +105,9 @@ export default function SettingsPage() {
     try {
       await api.delete("/auth/account")
       useAuthStore.getState().clearAuth()
-      showSuccess("Account deleted successfully")
+      showSuccess("계정이 성공적으로 삭제되었습니다")
     } catch (error: any) {
-      const message = error.response?.data?.message || "Failed to delete account"
+      const message = error.response?.data?.message || "계정 삭제에 실패했습니다"
       showError(message)
     }
   }
@@ -115,8 +115,8 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Account Settings</h1>
-        <p className="text-gray-600 dark:text-gray-400">Manage your account settings and preferences.</p>
+        <h1 className="text-3xl font-bold">계정 설정</h1>
+        <p className="text-gray-600 dark:text-gray-400">계정 설정 및 개인정보를 관리하세요.</p>
       </div>
 
       {/* Profile Settings */}
@@ -124,9 +124,9 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
-            Profile Information
+            프로필 정보
           </CardTitle>
-          <CardDescription>Update your account profile information.</CardDescription>
+          <CardDescription>계정 프로필 정보를 업데이트하세요.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...profileForm}>
@@ -136,9 +136,9 @@ export default function SettingsPage() {
                 name="username"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Username</FormLabel>
+                    <FormLabel>사용자명</FormLabel>
                     <FormControl>
-                      <Input placeholder="Enter your username" {...field} />
+                      <Input placeholder="사용자명을 입력하세요" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -150,9 +150,9 @@ export default function SettingsPage() {
                 name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email</FormLabel>
+                    <FormLabel>이메일</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="Enter your email" {...field} />
+                      <Input type="email" placeholder="이메일을 입력하세요" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -161,7 +161,7 @@ export default function SettingsPage() {
 
               <Button type="submit" disabled={isUpdatingProfile}>
                 {isUpdatingProfile && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Update Profile
+                프로필 업데이트
               </Button>
             </form>
           </Form>
@@ -173,9 +173,9 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Lock className="h-5 w-5" />
-            Change Password
+            비밀번호 변경
           </CardTitle>
-          <CardDescription>Update your password to keep your account secure.</CardDescription>
+          <CardDescription>계정 보안을 위해 비밀번호를 업데이트하세요.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...passwordForm}>
@@ -185,9 +185,9 @@ export default function SettingsPage() {
                 name="currentPassword"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Current Password</FormLabel>
+                    <FormLabel>현재 비밀번호</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="Enter your current password" {...field} />
+                      <Input type="password" placeholder="현재 비밀번호를 입력하세요" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -199,9 +199,9 @@ export default function SettingsPage() {
                 name="newPassword"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>New Password</FormLabel>
+                    <FormLabel>새 비밀번호</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="Enter your new password" {...field} />
+                      <Input type="password" placeholder="새 비밀번호를 입력하세요" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -213,9 +213,9 @@ export default function SettingsPage() {
                 name="confirmPassword"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Confirm New Password</FormLabel>
+                    <FormLabel>새 비밀번호 확인</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="Confirm your new password" {...field} />
+                      <Input type="password" placeholder="새 비밀번호를 다시 입력하세요" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -224,7 +224,7 @@ export default function SettingsPage() {
 
               <Button type="submit" disabled={isUpdatingPassword}>
                 {isUpdatingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Update Password
+                비밀번호 업데이트
               </Button>
             </form>
           </Form>
@@ -238,27 +238,27 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
             <Trash2 className="h-5 w-5" />
-            Danger Zone
+            위험 영역
           </CardTitle>
-          <CardDescription>Irreversible and destructive actions.</CardDescription>
+          <CardDescription>되돌릴 수 없는 파괴적인 작업입니다.</CardDescription>
         </CardHeader>
         <CardContent>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="destructive">Delete Account</Button>
+              <Button variant="destructive">계정 삭제</Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete Account</AlertDialogTitle>
+                <AlertDialogTitle>계정 삭제</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Are you sure you want to delete your account? This action cannot be undone and will permanently delete
-                  all your data, including hosting instances.
+                  정말로 계정을 삭제하시겠습니까? 이 작업은 되돌릴 수 없으며 호스팅 인스턴스를 포함한 
+                  모든 데이터가 영구적으로 삭제됩니다.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>취소</AlertDialogCancel>
                 <AlertDialogAction onClick={handleDeleteAccount} className="bg-red-600 hover:bg-red-700">
-                  Delete Account
+                  계정 삭제
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

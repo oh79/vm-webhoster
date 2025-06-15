@@ -1,0 +1,46 @@
+====================================================
+서비스 상태 점검 - Sun Jun 15 06:40:24 UTC 2025
+====================================================
+
+시스템 서비스 상태:
+✅ postgresql: 실행 중
+✅ redis-server: 실행 중
+✅ nginx: 실행 중
+✅ docker: 실행 중
+
+포트 사용 현황:
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:6379          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:3000            0.0.0.0:*               LISTEN      138668/next-server  
+tcp        0      0 127.0.0.1:5432          0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8049            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8050            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8054            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8008            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8000            0.0.0.0:*               LISTEN      138588/python3      
+tcp        0      0 0.0.0.0:8007            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8027            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8070            0.0.0.0:*               LISTEN      -                   
+tcp6       0      0 :::80                   :::*                    LISTEN      -                   
+tcp6       0      0 ::1:6379                :::*                    LISTEN      -                   
+tcp6       0      0 :::8049                 :::*                    LISTEN      -                   
+tcp6       0      0 :::8050                 :::*                    LISTEN      -                   
+tcp6       0      0 :::8054                 :::*                    LISTEN      -                   
+tcp6       0      0 :::8008                 :::*                    LISTEN      -                   
+tcp6       0      0 :::8007                 :::*                    LISTEN      -                   
+tcp6       0      0 :::8027                 :::*                    LISTEN      -                   
+tcp6       0      0 :::8070                 :::*                    LISTEN      -                   
+
+프로세스 정보:
+root         793  0.0  0.1  33196 19720 ?        Ss   Jun14   0:00 /usr/bin/python3 /usr/bin/networkd-dispatcher --run-startup-triggers
+root         866  0.0  0.1 110132 21484 ?        Ssl  Jun14   0:00 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal
+postgres   23493  0.0  0.1 218788 30592 ?        Ss   Jun14   0:02 /usr/lib/postgresql/14/bin/postgres -D /var/lib/postgresql/14/main -c config_file=/etc/postgresql/14/main/postgresql.conf
+postgres   23495  0.0  0.0 218900 12660 ?        Ss   Jun14   0:00 postgres: 14/main: checkpointer 
+postgres   23496  0.0  0.0 218788  9360 ?        Ss   Jun14   0:00 postgres: 14/main: background writer 
+postgres   23497  0.0  0.0 218788 11732 ?        Ss   Jun14   0:00 postgres: 14/main: walwriter 
+postgres   23498  0.0  0.0 219356  9688 ?        Ss   Jun14   0:01 postgres: 14/main: autovacuum launcher 
+postgres   23499  0.0  0.0  73516  7404 ?        Ss   Jun14   0:01 postgres: 14/main: stats collector 
+postgres   23500  0.0  0.0 219216  7948 ?        Ss   Jun14   0:00 postgres: 14/main: logical replication launcher 
+redis      30910  0.1  0.0  67244 11128 ?        Ssl  Jun14   1:20 /usr/bin/redis-server 127.0.0.1:6379
+
+====================================================

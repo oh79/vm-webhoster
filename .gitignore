@@ -10,7 +10,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -23,6 +22,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+backend/vm-images/containers/
 # PyInstaller
 *.manifest
 *.spec
@@ -42,13 +42,13 @@ coverage.xml
 .pytest_cache/
 
 # Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env.example
-config.env.example
+# .env
+# .env.local
+# .env.development.local
+# .env.test.local
+# .env.production.local
+# .env.example
+# config.env.example
 
 # IDEs
 .vscode/
@@ -79,8 +79,7 @@ venv.bak/
 webhoster_dev.db
 
 # Logs
-*.log
-logs/
+logs/*
 backend/logs/
 frontend/logs/
 

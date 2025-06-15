@@ -5,13 +5,12 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useAuthStore } from "@/store/auth-store"
-import { Home, Server, Settings, LogOut, Menu, X, CreditCard } from "lucide-react"
+import { Home, Server, Settings, LogOut, Menu, X } from "lucide-react"
 import { useState } from "react"
 
 const navigation = [
   { name: "대시보드", href: "/dashboard", icon: Home },
   { name: "내 호스팅", href: "/dashboard/hosting", icon: Server },
-  { name: "결제 관리", href: "/dashboard/billing", icon: CreditCard },
   { name: "계정 설정", href: "/dashboard/settings", icon: Settings },
 ]
 
@@ -54,7 +53,14 @@ export function DashboardSidebar() {
 
           <nav className="flex-1 px-4 py-6 space-y-2">
             {navigation.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+              let isActive = false
+              
+              if (item.href === "/dashboard") {
+                isActive = pathname === "/dashboard"
+              } else {
+                isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+              }
+              
               return (
                 <Link
                   key={item.name}

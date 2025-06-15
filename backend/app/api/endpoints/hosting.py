@@ -1,35 +1,30 @@
 """
-호스팅 관련 API 엔드포인트
+호스팅 API 엔드포인트 - VM 기반 웹 호스팅 관리 (개선된 버전)
 """
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+import logging
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.hosting import HostingStatus
 from app.schemas.hosting import (
-    HostingCreate, 
-    HostingResponse, 
-    HostingDetail, 
-    HostingStats,
-    HostingOperation,
-    VMInfo
+    HostingCreate, HostingResponse, HostingDetail, HostingUpdate,
+    HostingOperation, HostingStats
 )
 from app.schemas.common import StandardResponse, PaginatedResponse
-from app.services.hosting_service import HostingService
-from app.core.dependencies import get_current_user_id
 from app.utils.response_utils import (
     create_success_response,
     create_paginated_response,
     validate_pagination_params,
     calculate_offset
 )
-from app.utils.logging_utils import log_request_info, get_logger
+from app.utils.logging_utils import get_logger, log_request_info
+from app.services.hosting_service import HostingService
+from app.core.dependencies import get_current_user_id
 from app.core.exceptions import (
-    HostingNotFoundError,
-    HostingAlreadyExistsError,
-    VMOperationError,
-    InsufficientPermissionError
+    HostingNotFoundError, HostingAlreadyExistsError,
+    VMOperationError, InsufficientPermissionError
 )
 
 # 라우터 설정
@@ -89,9 +84,9 @@ def create_hosting(
 
 @router.get(
     "/my",
-    response_model=StandardResponse[HostingResponse],
+    response_model=StandardResponse[Optional[HostingResponse]],
     summary="내 호스팅 조회",
-    description="현재 사용자의 호스팅을 조회합니다."
+    description="현재 사용자의 호스팅을 조회합니다. 호스팅이 없으면 null을 반환합니다."
 )
 def get_my_hosting(
     current_user_id: int = Depends(get_current_user_id),
@@ -101,7 +96,7 @@ def get_my_hosting(
     내 호스팅 조회
     
     현재 사용자의 호스팅을 조회합니다.
-    사용자당 1개의 호스팅만 가질 수 있습니다.
+    호스팅이 없는 경우 404 에러가 아닌 null을 반환합니다.
     """
     log_request_info("GET", "/hosting/my", user_id=current_user_id)
     
@@ -110,21 +105,24 @@ def get_my_hosting(
         hosting = hosting_service.get_hosting_by_user_id(current_user_id)
         
         if not hosting:
-            raise HostingNotFoundError("호스팅을 찾을 수 없습니다.")
+            logger.info(f"호스팅 없음: 사용자 {current_user_id}")
+            return create_success_response(
+                message="호스팅이 없습니다.",
+                data=None
+            )
+        
+        # 상태 동기화
+        hosting = hosting_service.sync_hosting_status(hosting.id)
+        
+        hosting_response = HostingResponse.model_validate(hosting)
         
         logger.info(f"내 호스팅 조회: 사용자 {current_user_id}, 호스팅 {hosting.id}")
         
         return create_success_response(
-            message="호스팅 정보를 조회했습니다.",
-            data=HostingResponse.model_validate(hosting)
+            message="호스팅을 조회했습니다.",
+            data=hosting_response
         )
         
-    except HostingNotFoundError as e:
-        logger.warning(f"내 호스팅 조회 실패: {e.detail}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=e.detail
-        )
     except Exception as e:
         logger.error(f"내 호스팅 조회 실패: {e}")
         raise HTTPException(
@@ -485,6 +483,170 @@ def get_hosting_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="호스팅 통계 조회 중 오류가 발생했습니다."
+        )
+
+@router.get(
+    "/health/{hosting_id}",
+    response_model=StandardResponse[Dict[str, Any]],
+    summary="호스팅 헬스체크",
+    description="호스팅의 상태를 점검하고 상세 정보를 조회합니다."
+)
+def check_hosting_health(
+    hosting_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    호스팅 헬스체크
+    
+    VM 상태, 네트워크 연결성, SSH 접근성 등을 확인합니다.
+    """
+    log_request_info("GET", f"/host/health/{hosting_id}", user_id=current_user_id)
+    
+    try:
+        hosting_service = HostingService(db)
+        health_status = hosting_service.perform_health_check(hosting_id)
+        
+        # 권한 확인 (호스팅 소유자만 조회 가능)
+        hosting = hosting_service.get_hosting_by_id(hosting_id)
+        if not hosting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="호스팅을 찾을 수 없습니다."
+            )
+        
+        if hosting.user_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="본인의 호스팅만 조회할 수 있습니다."
+            )
+        
+        logger.info(f"호스팅 헬스체크 완료: 호스팅 ID {hosting_id}, 사용자 {current_user_id}")
+        
+        return create_success_response(
+            message="호스팅 헬스체크가 완료되었습니다.",
+            data=health_status
+        )
+        
+    except HostingNotFoundError:
+        logger.warning(f"헬스체크 실패 - 호스팅 없음: {hosting_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="호스팅을 찾을 수 없습니다."
+        )
+    except InsufficientPermissionError as e:
+        logger.warning(f"헬스체크 실패 - 권한 없음: {e.detail}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.detail
+        )
+    except Exception as e:
+        logger.error(f"호스팅 헬스체크 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="호스팅 헬스체크 중 오류가 발생했습니다."
+        )
+
+@router.get(
+    "/ssh/{hosting_id}",
+    response_model=StandardResponse[Dict[str, str]],
+    summary="SSH 접속 정보 조회",
+    description="호스팅의 SSH 접속에 필요한 정보를 조회합니다."
+)
+def get_hosting_ssh_info(
+    hosting_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    SSH 접속 정보 조회
+    
+    SSH 키, 접속 명령어, 포트 정보 등을 제공합니다.
+    """
+    log_request_info("GET", f"/host/ssh/{hosting_id}", user_id=current_user_id)
+    
+    try:
+        hosting_service = HostingService(db)
+        ssh_info = hosting_service.get_hosting_ssh_info(hosting_id, current_user_id)
+        
+        logger.info(f"SSH 정보 조회 완료: 호스팅 ID {hosting_id}, 사용자 {current_user_id}")
+        
+        return create_success_response(
+            message="SSH 접속 정보를 조회했습니다.",
+            data=ssh_info
+        )
+        
+    except HostingNotFoundError:
+        logger.warning(f"SSH 정보 조회 실패 - 호스팅 없음: {hosting_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="호스팅을 찾을 수 없습니다."
+        )
+    except InsufficientPermissionError as e:
+        logger.warning(f"SSH 정보 조회 실패 - 권한 없음: {e.detail}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.detail
+        )
+    except VMOperationError as e:
+        logger.error(f"SSH 정보 조회 실패: {e.detail}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=e.detail
+        )
+    except Exception as e:
+        logger.error(f"SSH 정보 조회 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SSH 정보 조회 중 오류가 발생했습니다."
+        )
+
+@router.get(
+    "/detailed/{hosting_id}",
+    response_model=StandardResponse[Dict[str, Any]],
+    summary="상세 호스팅 정보 조회",
+    description="헬스 상태를 포함한 상세 호스팅 정보를 조회합니다."
+)
+def get_detailed_hosting_info(
+    hosting_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """
+    상세 호스팅 정보 조회
+    
+    기본 호스팅 정보와 헬스 상태를 함께 제공합니다.
+    """
+    log_request_info("GET", f"/host/detailed/{hosting_id}", user_id=current_user_id)
+    
+    try:
+        hosting_service = HostingService(db)
+        detailed_info = hosting_service.get_hosting_with_health_status(hosting_id, current_user_id)
+        
+        logger.info(f"상세 호스팅 정보 조회 완료: 호스팅 ID {hosting_id}, 사용자 {current_user_id}")
+        
+        return create_success_response(
+            message="상세 호스팅 정보를 조회했습니다.",
+            data=detailed_info
+        )
+        
+    except HostingNotFoundError:
+        logger.warning(f"상세 정보 조회 실패 - 호스팅 없음: {hosting_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="호스팅을 찾을 수 없습니다."
+        )
+    except InsufficientPermissionError as e:
+        logger.warning(f"상세 정보 조회 실패 - 권한 없음: {e.detail}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=e.detail
+        )
+    except Exception as e:
+        logger.error(f"상세 호스팅 정보 조회 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="상세 호스팅 정보 조회 중 오류가 발생했습니다."
         )
 
 @router.get(

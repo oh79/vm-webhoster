@@ -1,321 +1,633 @@
 """
-Nginx 프록시 서비스 - 웹/SSH 포트 포워딩 관리
+프록시 서비스 - Nginx 리버스 프록시 관리 (리팩토링 버전)
 """
 import os
 import subprocess
 import logging
-import random
+import time
+from typing import Dict, Any, Optional
 from pathlib import Path
-from typing import Optional, Dict
-from jinja2 import Environment, FileSystemLoader
+from datetime import datetime
+from jinja2 import Template
 
 from app.core.config import settings
-from app.core.exceptions import VMOperationError
+from app.utils.logging_utils import get_logger
 
-# 로깅 설정
-logger = logging.getLogger(__name__)
+logger = get_logger("proxy_service")
 
 class ProxyService:
-    """Nginx 프록시 관리 서비스"""
+    """
+    Nginx 리버스 프록시 관리 서비스 (리팩토링 버전)
+    
+    새로운 구조:
+    - 모듈화된 nginx 설정
+    - Jinja2 템플릿 시스템
+    - 통합된 설정 관리
+    - 자동 백업 및 롤백
+    """
     
     def __init__(self):
-        self.nginx_config_path = Path(settings.NGINX_CONFIG_PATH)
-        self.sites_enabled_path = Path("/etc/nginx/sites-enabled")
-        self.service_domain = settings.SERVICE_DOMAIN
+        # 프로젝트 nginx 디렉토리 (개발용)
+        self.project_nginx_dir = Path(settings.PROJECT_ROOT) / "nginx"
         
-        # Jinja2 템플릿 환경 설정
-        template_dir = Path(__file__).parent.parent / "templates"
-        self.jinja_env = Environment(
-            loader=FileSystemLoader(str(template_dir)),
-            autoescape=True
-        )
+        # 시스템 nginx 디렉토리 (운영용)
+        self.nginx_dir = Path("/etc/nginx")
+        self.hosting_dir = self.nginx_dir / "sites-available" / "hosting"
         
-        # 설정 디렉토리 생성
-        self._ensure_directories()
+        # 템플릿 파일 경로
+        self.template_file = self.project_nginx_dir / "templates" / "user-hosting.conf.j2"
+        
+        # nginx 관리 스크립트
+        self.manager_script = Path(settings.PROJECT_ROOT) / "scripts" / "nginx-config-manager.sh"
+        
+        # 설정 검증
+        self._validate_setup()
     
-    def _ensure_directories(self):
-        """필요한 디렉토리들이 존재하는지 확인하고 생성"""
+    def _validate_setup(self) -> None:
+        """초기 설정 검증"""
         try:
-            # Nginx 설정 디렉토리 생성
-            self.nginx_config_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Nginx 설정 디렉토리 확인: {self.nginx_config_path}")
+            # 디렉토리 생성
+            self.hosting_dir.mkdir(parents=True, exist_ok=True)
             
-            # sites-enabled 디렉토리 확인 (실제 시스템에서)
-            if not self.sites_enabled_path.exists():
-                logger.warning(f"sites-enabled 디렉토리가 없습니다: {self.sites_enabled_path}")
+            # 템플릿 파일 확인
+            if not self.template_file.exists():
+                logger.warning(f"템플릿 파일이 없습니다: {self.template_file}")
+            
+            # 관리 스크립트 확인
+            if not self.manager_script.exists():
+                logger.warning(f"관리 스크립트가 없습니다: {self.manager_script}")
+            else:
+                # 실행 권한 확인
+                self.manager_script.chmod(0o755)
                 
         except Exception as e:
-            logger.error(f"디렉토리 생성 실패: {e}")
-            raise VMOperationError(f"프록시 디렉토리 설정 실패: {e}")
+            logger.error(f"프록시 서비스 초기화 실패: {e}")
     
-    def get_random_port(self, start: int = None, end: int = None) -> int:
+    def add_proxy_rule(
+        self, 
+        user_id: str, 
+        vm_ip: str, 
+        ssh_port: int,
+        web_port: int = 80,
+        vm_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        사용 가능한 랜덤 포트 반환
-        """
-        start = start or settings.SSH_PORT_RANGE_START
-        end = end or settings.SSH_PORT_RANGE_END
-        
-        max_attempts = 100
-        for _ in range(max_attempts):
-            port = random.randint(start, end)
-            if self._is_port_available(port):
-                logger.info(f"사용 가능한 포트 할당: {port}")
-                return port
-        
-        raise VMOperationError(f"사용 가능한 포트를 찾을 수 없습니다. (범위: {start}-{end})")
-    
-    def _is_port_available(self, port: int) -> bool:
-        """
-        포트 사용 가능 여부 확인
-        """
-        try:
-            # netstat으로 포트 사용 확인
-            result = subprocess.run(
-                ["netstat", "-an"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            # 포트가 LISTEN 상태인지 확인
-            port_patterns = [f":{port} ", f":{port}\t"]
-            for pattern in port_patterns:
-                if pattern in result.stdout and "LISTEN" in result.stdout:
-                    return False
-                    
-            return True
-            
-        except subprocess.TimeoutExpired:
-            logger.warning("포트 확인 시간 초과")
-            return True
-        except Exception as e:
-            logger.warning(f"포트 확인 중 오류: {e}")
-            return True  # 확인할 수 없으면 사용 가능한 것으로 간주
-    
-    def add_proxy_rule(self, user_id: str, vm_ip: str, ssh_port: int) -> Dict[str, str]:
-        """
-        웹 서비스 및 SSH 프록시 규칙 추가
+        사용자 호스팅 프록시 규칙 추가 (개선된 버전 - 검증 및 자동 복구 포함)
         
         Args:
-            user_id: 사용자 ID (VM ID)
+            user_id: 사용자 ID
             vm_ip: VM IP 주소
-            ssh_port: SSH 포트 번호
-            
+            ssh_port: SSH 포트
+            web_port: 웹 포트 (기본값: 80)
+            vm_id: VM ID (선택사항)
+        
         Returns:
-            웹 URL 및 SSH 연결 정보
+            프록시 설정 결과 정보
         """
         try:
-            # 1. 웹 서비스 프록시 설정 생성
-            web_url = self._create_web_proxy(user_id, vm_ip)
+            logger.info(f"프록시 규칙 추가 시작: 사용자 {user_id}, IP: {vm_ip}, 웹포트: {web_port}")
             
-            # 2. SSH 포트 포워딩 설정 (향후 구현)
-            ssh_command = f"ssh -p {ssh_port} ubuntu@{self.service_domain.split(':')[0]}"
+            # VM ID 기본값 설정
+            if not vm_id:
+                vm_id = f"vm-{user_id}"
             
-            # 3. Nginx 설정 리로드
-            if self._reload_nginx():
-                logger.info(f"프록시 규칙 추가 완료: 사용자 {user_id}")
-                
-                return {
-                    "web_url": web_url,
-                    "ssh_command": ssh_command,
-                    "ssh_port": str(ssh_port),
-                    "vm_ip": vm_ip
-                }
-            else:
-                raise VMOperationError("Nginx 설정 리로드 실패")
-                
-        except Exception as e:
-            logger.error(f"프록시 규칙 추가 실패: {e}")
-            # 실패 시 생성된 설정 파일 정리
-            self._cleanup_config_file(user_id)
-            raise VMOperationError(f"프록시 규칙 추가 실패: {e}")
-    
-    def _create_web_proxy(self, user_id: str, vm_ip: str) -> str:
-        """
-        웹 서비스 프록시 설정 생성
-        """
-        try:
-            # 템플릿 로드
-            template = self.jinja_env.get_template("nginx-site.conf.j2")
+            # 컨테이너 연결 사전 테스트
+            if not self._test_vm_connection(vm_ip, web_port):
+                logger.warning(f"VM 연결 테스트 실패: {vm_ip}:{web_port}, 계속 진행...")
             
-            # 템플릿 변수
-            template_vars = {
+            # nginx 관리 스크립트를 sudo 권한으로 실행
+            cmd = [
+                "sudo",
+                str(self.manager_script),
+                "add-user", user_id,
+                "--vm-id", vm_id,
+                "--vm-ip", vm_ip,
+                "--web-port", str(web_port),
+                "--ssh-port", str(ssh_port),
+                "--force"  # 기존 설정 덮어쓰기
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            logger.info(f"설정 추가 완료: {result.stdout}")
+            
+            # Nginx 설정 검증 (sudo 권한으로)
+            if not self._validate_nginx_config_with_sudo():
+                logger.error("Nginx 설정 검증 실패")
+                raise Exception("생성된 nginx 설정에 오류가 있습니다")
+            
+            # Nginx 설정 리로드
+            self._reload_nginx()
+            
+            # 설정 적용 후 검증 (최대 30초 대기)
+            proxy_working = False
+            for i in range(30):
+                time.sleep(1)
+                if self._test_proxy_rule(user_id, vm_ip, web_port):
+                    proxy_working = True
+                    logger.info(f"프록시 규칙 검증 성공: 사용자 {user_id}")
+                    break
+            
+            if not proxy_working:
+                logger.warning(f"프록시 규칙 검증 실패: 사용자 {user_id}, 자동 복구 시도...")
+                # 자동 복구 시도
+                if self._auto_fix_proxy_rule(user_id, vm_ip, web_port, ssh_port, vm_id):
+                    logger.info(f"프록시 규칙 자동 복구 성공: 사용자 {user_id}")
+                    proxy_working = True
+                else:
+                    logger.error(f"프록시 규칙 자동 복구 실패: 사용자 {user_id}")
+            
+            # 결과 정보 생성
+            proxy_info = {
                 "user_id": user_id,
+                "vm_id": vm_id,
                 "vm_ip": vm_ip,
-                "service_domain": self.service_domain.split(':')[0],  # 도메인만 추출
-                "vm_port": 80
+                "web_port": web_port,
+                "ssh_port": ssh_port,
+                "web_url": f"http://localhost/{user_id}",
+                "ssh_command": f"ssh -p {ssh_port} ubuntu@localhost",
+                "sftp_command": f"sftp -P {ssh_port} ubuntu@localhost",
+                "config_file": str(self.hosting_dir / f"{user_id}.conf"),
+                "status": "active" if proxy_working else "warning",
+                "verified": proxy_working,
+                "created_at": datetime.now().isoformat()
             }
             
-            # 설정 파일 내용 생성
-            config_content = template.render(**template_vars)
+            logger.info(f"프록시 규칙 추가 완료: 사용자 {user_id}, 검증: {'성공' if proxy_working else '실패'}")
+            return proxy_info
             
-            # 설정 파일 저장
-            config_file = self.nginx_config_path / f"{user_id}.conf"
-            with open(config_file, 'w', encoding='utf-8') as f:
-                f.write(config_content)
-            
-            # sites-enabled에 심볼릭 링크 생성 (시스템에 따라 다를 수 있음)
-            self._create_symlink(config_file, user_id)
-            
-            # 웹 URL 생성
-            web_url = f"http://{self.service_domain}/{user_id}"
-            logger.info(f"웹 프록시 설정 생성: {web_url} -> {vm_ip}:80")
-            
-            return web_url
-            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"프록시 규칙 추가 실패: {e.stderr}")
+            raise Exception(f"nginx 설정 추가 실패: {e.stderr}")
         except Exception as e:
-            logger.error(f"웹 프록시 설정 생성 실패: {e}")
-            raise VMOperationError(f"웹 프록시 설정 생성 실패: {e}")
+            logger.error(f"프록시 규칙 추가 오류: {e}")
+            raise
     
-    def _create_symlink(self, config_file: Path, user_id: str):
+    def _test_vm_connection(self, vm_ip: str, web_port: int, timeout: int = 5) -> bool:
         """
-        sites-enabled에 심볼릭 링크 생성
+        VM 연결 테스트
+        
+        Args:
+            vm_ip: VM IP 주소
+            web_port: 웹 포트
+            timeout: 타임아웃 (초)
+        
+        Returns:
+            연결 성공 여부
         """
         try:
-            if self.sites_enabled_path.exists():
-                symlink_path = self.sites_enabled_path / f"{user_id}.conf"
-                
-                # 기존 심볼릭 링크 제거
-                if symlink_path.exists():
-                    symlink_path.unlink()
-                
-                # 새 심볼릭 링크 생성
-                symlink_path.symlink_to(config_file)
-                logger.info(f"심볼릭 링크 생성: {symlink_path} -> {config_file}")
+            import socket
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            
+            result = sock.connect_ex((vm_ip, web_port))
+            sock.close()
+            
+            return result == 0
+            
+        except Exception as e:
+            logger.error(f"VM 연결 테스트 오류: {e}")
+            return False
+    
+    def _test_proxy_rule(self, user_id: str, vm_ip: str, web_port: int) -> bool:
+        """
+        프록시 규칙 동작 테스트
+        
+        Args:
+            user_id: 사용자 ID
+            vm_ip: VM IP 주소
+            web_port: 웹 포트
+        
+        Returns:
+            프록시 동작 여부
+        """
+        try:
+            import requests
+            
+            # 로컬 프록시 URL 테스트
+            proxy_url = f"http://localhost/{user_id}"
+            
+            response = requests.get(proxy_url, timeout=10)
+            
+            if response.status_code == 200:
+                logger.info(f"프록시 규칙 테스트 성공: {proxy_url}")
+                return True
             else:
-                logger.warning("sites-enabled 디렉토리가 없어 심볼릭 링크를 생성하지 않습니다.")
+                logger.warning(f"프록시 규칙 테스트 실패: {proxy_url} (상태코드: {response.status_code})")
+                return False
                 
         except Exception as e:
-            logger.warning(f"심볼릭 링크 생성 실패: {e}")
-            # 심볼릭 링크 실패는 치명적이지 않으므로 계속 진행
+            logger.error(f"프록시 규칙 테스트 오류: {e}")
+            return False
+    
+    def _validate_nginx_config_with_sudo(self) -> bool:
+        """
+        Nginx 설정 검증 (sudo 권한으로)
+        
+        Returns:
+            설정 유효성 여부
+        """
+        try:
+            cmd = ["sudo", str(self.manager_script), "validate"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True
+            )
+            
+            return result.returncode == 0
+            
+        except Exception as e:
+            logger.error(f"Nginx 설정 검증 오류: {e}")
+            return False
+
+    def validate_nginx_config(self) -> bool:
+        """
+        Nginx 설정 검증 (공개 메서드)
+        
+        Returns:
+            설정 유효성 여부
+        """
+        return self._validate_nginx_config_with_sudo()
+    
+    def _auto_fix_proxy_rule(self, user_id: str, vm_ip: str, web_port: int, ssh_port: int, vm_id: str) -> bool:
+        """
+        프록시 규칙 자동 복구
+        
+        Args:
+            user_id: 사용자 ID
+            vm_ip: VM IP 주소
+            web_port: 웹 포트
+            ssh_port: SSH 포트
+            vm_id: VM ID
+        
+        Returns:
+            복구 성공 여부
+        """
+        try:
+            logger.info(f"프록시 규칙 자동 복구 시작: 사용자 {user_id}")
+            
+            # 1. 기존 설정 제거
+            self.remove_proxy_rule(user_id)
+            
+            # 2. 잠시 대기
+            time.sleep(2)
+            
+            # 3. 새로운 설정 추가 (재귀 호출 방지를 위해 간단한 버전)
+            cmd = [
+                "sudo",
+                str(self.manager_script),
+                "add-user", user_id,
+                "--vm-id", vm_id,
+                "--vm-ip", vm_ip,
+                "--web-port", str(web_port),
+                "--ssh-port", str(ssh_port),
+                "--force"
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+            # 4. nginx 리로드
+            self._reload_nginx()
+            
+            # 5. 복구 검증
+            time.sleep(3)
+            if self._test_proxy_rule(user_id, vm_ip, web_port):
+                logger.info(f"프록시 규칙 자동 복구 성공: 사용자 {user_id}")
+                return True
+            else:
+                logger.error(f"프록시 규칙 자동 복구 검증 실패: 사용자 {user_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"프록시 규칙 자동 복구 오류: {e}")
+            return False
     
     def remove_proxy_rule(self, user_id: str) -> bool:
         """
-        프록시 규칙 제거
+        사용자 호스팅 프록시 규칙 제거
         
         Args:
-            user_id: 사용자 ID (VM ID)
-            
-        Returns:
-            성공 여부
-        """
-        try:
-            # 1. 설정 파일 제거
-            config_file = self.nginx_config_path / f"{user_id}.conf"
-            if config_file.exists():
-                config_file.unlink()
-                logger.info(f"설정 파일 제거: {config_file}")
-            
-            # 2. 심볼릭 링크 제거
-            if self.sites_enabled_path.exists():
-                symlink_path = self.sites_enabled_path / f"{user_id}.conf"
-                if symlink_path.exists():
-                    symlink_path.unlink()
-                    logger.info(f"심볼릭 링크 제거: {symlink_path}")
-            
-            # 3. Nginx 설정 리로드
-            if self._reload_nginx():
-                logger.info(f"프록시 규칙 제거 완료: 사용자 {user_id}")
-                return True
-            else:
-                logger.error("Nginx 설정 리로드 실패")
-                return False
-                
-        except Exception as e:
-            logger.error(f"프록시 규칙 제거 실패: {e}")
-            return False
-    
-    def _cleanup_config_file(self, user_id: str):
-        """
-        설정 파일 정리 (에러 발생 시)
-        """
-        try:
-            config_file = self.nginx_config_path / f"{user_id}.conf"
-            if config_file.exists():
-                config_file.unlink()
-                logger.info(f"설정 파일 정리: {config_file}")
-        except Exception as e:
-            logger.warning(f"설정 파일 정리 실패: {e}")
-    
-    def reload_nginx(self) -> bool:
-        """
-        Nginx 설정 리로드 (외부 호출용)
-        """
-        return self._reload_nginx()
-    
-    def _reload_nginx(self) -> bool:
-        """
-        Nginx 설정 검증 및 리로드
-        """
-        try:
-            # 1. 설정 파일 검증
-            result = subprocess.run(
-                ["nginx", "-t"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"Nginx 설정 검증 실패: {result.stderr}")
-                return False
-            
-            # 2. Nginx 리로드
-            result = subprocess.run(
-                ["nginx", "-s", "reload"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                logger.info("Nginx 설정 리로드 성공")
-                return True
-            else:
-                logger.error(f"Nginx 리로드 실패: {result.stderr}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            logger.error("Nginx 리로드 시간 초과")
-            return False
-        except FileNotFoundError:
-            logger.warning("nginx 명령어를 찾을 수 없습니다. (개발 환경일 수 있음)")
-            return True  # 개발 환경에서는 성공으로 처리
-        except Exception as e:
-            logger.error(f"Nginx 리로드 중 오류: {e}")
-            return False
-    
-    def add_ssh_forwarding(self, user_id: str, vm_ip: str, ssh_port: int) -> bool:
-        """
-        SSH 포트 포워딩 설정 추가 (향후 확장용)
+            user_id: 사용자 ID
         
-        현재는 iptables나 별도 SSH 터널링 구현 필요
+        Returns:
+            제거 성공 여부
         """
         try:
-            # TODO: iptables 규칙 또는 SSH 터널링 설정
-            logger.info(f"SSH 포트 포워딩 설정: {ssh_port} -> {vm_ip}:22")
+            logger.info(f"프록시 규칙 제거 시작: 사용자 {user_id}")
+            
+            # nginx 관리 스크립트를 sudo 권한으로 실행
+            cmd = [
+                "sudo",
+                str(self.manager_script),
+                "remove-user", user_id
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            logger.info(f"설정 제거 완료: {result.stdout}")
+            
+            # Nginx 설정 리로드
+            self._reload_nginx()
+            
+            logger.info(f"프록시 규칙 제거 완료: 사용자 {user_id}")
             return True
             
+        except subprocess.CalledProcessError as e:
+            logger.error(f"프록시 규칙 제거 실패: {e.stderr}")
+            return False
         except Exception as e:
-            logger.error(f"SSH 포트 포워딩 설정 실패: {e}")
+            logger.error(f"프록시 규칙 제거 오류: {e}")
             return False
     
-    def get_proxy_info(self, user_id: str) -> Optional[Dict[str, str]]:
+    def update_proxy_rule(
+        self, 
+        user_id: str, 
+        vm_ip: str, 
+        ssh_port: int,
+        web_port: int = 80,
+        vm_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        프록시 설정 정보 조회
+        사용자 호스팅 프록시 규칙 업데이트
+        
+        Args:
+            user_id: 사용자 ID
+            vm_ip: VM IP 주소  
+            ssh_port: SSH 포트
+            web_port: 웹 포트
+            vm_id: VM ID
+        
+        Returns:
+            업데이트된 프록시 설정 정보
         """
         try:
-            config_file = self.nginx_config_path / f"{user_id}.conf"
+            logger.info(f"프록시 규칙 업데이트 시작: 사용자 {user_id}")
+            
+            # 기존 규칙 제거 후 새로 추가
+            return self.add_proxy_rule(user_id, vm_ip, ssh_port, web_port, vm_id)
+            
+        except Exception as e:
+            logger.error(f"프록시 규칙 업데이트 오류: {e}")
+            raise
+    
+    def get_proxy_info(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        사용자 프록시 설정 정보 조회
+        
+        Args:
+            user_id: 사용자 ID
+        
+        Returns:
+            프록시 설정 정보 또는 None
+        """
+        try:
+            config_file = self.hosting_dir / f"{user_id}.conf"
             
             if not config_file.exists():
                 return None
             
+            # 설정 파일에서 정보 추출
+            config_content = config_file.read_text()
+            
+            # 간단한 파싱 (정규식 사용 가능)
+            vm_id = self._extract_from_config(config_content, "# VM ID: (.+)")
+            web_port = self._extract_from_config(config_content, r"proxy_pass http://[^:]+:(\d+)")
+            ssh_port = self._extract_from_config(config_content, r"ssh -p (\d+)")
+            vm_ip = self._extract_from_config(config_content, r"proxy_pass http://([^:]+):")
+            
             return {
+                "user_id": user_id,
+                "vm_id": vm_id,
+                "vm_ip": vm_ip or "127.0.0.1",
+                "web_port": int(web_port) if web_port else 80,
+                "ssh_port": int(ssh_port) if ssh_port else None,
+                "web_url": f"http://localhost/{user_id}",
+                "ssh_command": f"ssh -p {ssh_port} ubuntu@localhost" if ssh_port else None,
                 "config_file": str(config_file),
-                "web_url": f"http://{self.service_domain}/{user_id}",
-                "status": "active" if config_file.exists() else "inactive"
+                "status": "active"
             }
             
         except Exception as e:
-            logger.error(f"프록시 정보 조회 실패: {e}")
-            return None 
+            logger.error(f"프록시 정보 조회 오류: {e}")
+            return None
+    
+    def list_proxy_rules(self) -> Dict[str, Any]:
+        """
+        모든 프록시 규칙 목록 조회
+        
+        Returns:
+            프록시 규칙 목록 정보
+        """
+        try:
+            # nginx 관리 스크립트를 사용하여 사용자 목록 조회
+            cmd = [str(self.manager_script), "list-users"]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            # 결과 파싱
+            users = []
+            for line in result.stdout.split('\n'):
+                if '사용자 ID:' in line:
+                    # 예: "  • 사용자 ID: 7 (VM: vm-abc123)"
+                    parts = line.strip().split()
+                    if len(parts) >= 4:
+                        user_id = parts[3]
+                        vm_id = parts[5].strip('()') if len(parts) > 5 else "N/A"
+                        users.append({
+                            "user_id": user_id,
+                            "vm_id": vm_id
+                        })
+            
+            return {
+                "total_users": len(users),
+                "users": users,
+                "status": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"프록시 규칙 목록 조회 오류: {e}")
+            return {
+                "total_users": 0,
+                "users": [],
+                "status": "error",
+                "error": str(e)
+            }
+    
+    def get_nginx_status(self) -> Dict[str, Any]:
+        """
+        Nginx 서비스 상태 조회
+        
+        Returns:
+            Nginx 상태 정보
+        """
+        try:
+            cmd = [str(self.manager_script), "status"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True
+            )
+            
+            return {
+                "status": "running" if "실행 중" in result.stdout else "stopped",
+                "config_valid": self.validate_nginx_config(),
+                "output": result.stdout,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Nginx 상태 조회 오류: {e}")
+            return {
+                "status": "unknown",
+                "config_valid": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    def cleanup_old_configs(self) -> Dict[str, Any]:
+        """
+        이전 버전의 nginx 설정 파일들 정리
+        
+        Returns:
+            정리 결과 정보
+        """
+        try:
+            logger.info("이전 nginx 설정 파일 정리 시작")
+            
+            cmd = [str(self.manager_script), "cleanup", "--backup"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            logger.info(f"정리 완료: {result.stdout}")
+            
+            return {
+                "status": "success",
+                "message": "이전 설정 파일들이 정리되었습니다",
+                "output": result.stdout
+            }
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"설정 파일 정리 실패: {e.stderr}")
+            return {
+                "status": "error",
+                "message": "설정 파일 정리 중 오류가 발생했습니다",
+                "error": e.stderr
+            }
+        except Exception as e:
+            logger.error(f"설정 파일 정리 오류: {e}")
+            return {
+                "status": "error",
+                "message": "설정 파일 정리 중 예상치 못한 오류가 발생했습니다",
+                "error": str(e)
+            }
+    
+    def migrate_from_old_structure(self) -> Dict[str, Any]:
+        """
+        기존 구조에서 새 구조로 마이그레이션
+        
+        Returns:
+            마이그레이션 결과 정보
+        """
+        try:
+            logger.info("nginx 설정 마이그레이션 시작")
+            
+            cmd = [str(self.manager_script), "migrate", "--backup"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            logger.info(f"마이그레이션 완료: {result.stdout}")
+            
+            return {
+                "status": "success",
+                "message": "nginx 설정 마이그레이션이 완료되었습니다",
+                "output": result.stdout
+            }
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"마이그레이션 실패: {e.stderr}")
+            return {
+                "status": "error",
+                "message": "마이그레이션 중 오류가 발생했습니다",
+                "error": e.stderr
+            }
+        except Exception as e:
+            logger.error(f"마이그레이션 오류: {e}")
+            return {
+                "status": "error", 
+                "message": "마이그레이션 중 예상치 못한 오류가 발생했습니다",
+                "error": str(e)
+            }
+    
+    def _extract_from_config(self, content: str, pattern: str) -> Optional[str]:
+        """설정 파일에서 패턴 매칭하여 값 추출"""
+        import re
+        match = re.search(pattern, content)
+        return match.group(1) if match else None
+    
+    def _reload_nginx(self) -> None:
+        """Nginx 설정 리로드"""
+        try:
+            # 개발 환경에서도 nginx 리로드 실행 (sudo 권한으로)
+            cmd = ["sudo", str(self.manager_script), "reload"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            logger.info("Nginx 리로드 완료")
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Nginx 리로드 실패: {e.stderr}")
+            raise Exception(f"Nginx 리로드 실패: {e.stderr}")
+    
+    def _ensure_nginx_running(self) -> bool:
+        """Nginx 서비스 실행 확인 및 시작"""
+        try:
+            # 서비스 상태 확인
+            result = subprocess.run(
+                ["systemctl", "is-active", "nginx"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                return True
+            
+            # 서비스 시작 시도
+            subprocess.run(
+                ["systemctl", "start", "nginx"],
+                check=True
+            )
+            
+            logger.info("Nginx 서비스 시작 완료")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Nginx 서비스 시작 실패: {e}")
+            return False 

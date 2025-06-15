@@ -1,7 +1,7 @@
 """
 인증 관련 API 엔드포인트
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,51 @@ from app.core.exceptions import (
 # 라우터 설정
 router = APIRouter(tags=["인증"])
 logger = get_logger("api.auth")
+
+@router.get(
+    "/check-email",
+    response_model=StandardResponse[dict],
+    summary="이메일 중복 확인",
+    description="회원가입 시 이메일 중복 여부를 확인합니다."
+)
+def check_email_availability(
+    email: str = Query(..., description="확인할 이메일 주소"),
+    db: Session = Depends(get_db)
+):
+    """
+    이메일 중복 확인
+    
+    - **email**: 확인할 이메일 주소
+    
+    사용 가능한 이메일이면 200, 이미 사용 중이면 409를 반환합니다.
+    """
+    log_request_info("GET", "/auth/check-email", extra_info={"email": email})
+    
+    try:
+        user_service = UserService(db)
+        existing_user = user_service.get_user_by_email(email)
+        
+        if existing_user:
+            logger.info(f"이메일 중복: {email}")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 사용 중인 이메일입니다."
+            )
+        
+        logger.info(f"이메일 사용 가능: {email}")
+        return create_success_response(
+            message="사용 가능한 이메일입니다.",
+            data={"available": True}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"이메일 확인 실패: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="이메일 확인 중 오류가 발생했습니다."
+        )
 
 @router.post(
     "/register",

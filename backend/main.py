@@ -15,10 +15,10 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS 미들웨어 설정 (Next.js 프론트엔드용)
+# CORS 미들웨어 설정 (Nginx에서 주요 CORS 처리, 여기서는 기본 설정만)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],  # Nginx에서 제한하므로 여기서는 허용
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
