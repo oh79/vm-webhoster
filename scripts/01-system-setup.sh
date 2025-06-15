@@ -146,14 +146,72 @@ echo "  - npm: $(npm --version)"
 # PostgreSQL 설치
 log_step "PostgreSQL 설치"
 if ! command -v psql &> /dev/null; then
-    sudo apt install -y postgresql postgresql-contrib
-    sudo systemctl start postgresql
-    sudo systemctl enable postgresql
+    log_info "PostgreSQL 설치 중..."
+    sudo apt install -y postgresql postgresql-contrib postgresql-client
+    
+    # 설치 완료 대기
+    sleep 5
+    
+    log_info "PostgreSQL 서비스 확인 중..."
+    
+    # 가능한 PostgreSQL 서비스 이름 확인
+    PG_SERVICE=""
+    for service in postgresql postgresql.service postgresql@*-main postgresql-*; do
+        if systemctl list-unit-files | grep -q "^${service%@*}"; then
+            PG_SERVICE="$service"
+            break
+        fi
+    done
+    
+    if [ -z "$PG_SERVICE" ]; then
+        # 실제 설치된 PostgreSQL 서비스 찾기
+        PG_SERVICE=$(systemctl list-unit-files | grep postgresql | head -1 | awk '{print $1}' || echo "postgresql")
+    fi
+    
+    log_info "감지된 PostgreSQL 서비스: $PG_SERVICE"
+    
+    # PostgreSQL 서비스 시작 및 활성화
+    sudo systemctl enable "$PG_SERVICE" 2>/dev/null || sudo systemctl enable postgresql 2>/dev/null || true
+    sudo systemctl start "$PG_SERVICE" 2>/dev/null || sudo systemctl start postgresql 2>/dev/null || true
+    
+    # 서비스 시작 대기 및 확인
+    sleep 3
+    
+    if systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null || systemctl is-active --quiet postgresql 2>/dev/null; then
+        log_success "PostgreSQL 서비스가 정상적으로 시작되었습니다."
+    else
+        log_warning "PostgreSQL 서비스 시작에 문제가 있을 수 있습니다. 수동으로 시작을 시도합니다."
+        # 수동 시작 시도
+        sudo -u postgres pg_ctl start -D /var/lib/postgresql/*/main/ 2>/dev/null || {
+            log_warning "수동 시작도 실패했습니다. 나중에 재시도됩니다."
+        }
+    fi
+    
     log_success "PostgreSQL 설치 완료"
 else
     log_info "PostgreSQL은 이미 설치되어 있습니다."
-    sudo systemctl start postgresql 2>/dev/null || true
-    sudo systemctl enable postgresql 2>/dev/null || true
+    
+    # 기존 설치된 PostgreSQL 서비스 확인 및 시작
+    PG_SERVICE=$(systemctl list-unit-files | grep postgresql | head -1 | awk '{print $1}' || echo "postgresql")
+    
+    if ! systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null; then
+        log_info "PostgreSQL 서비스를 시작하는 중..."
+        sudo systemctl start "$PG_SERVICE" 2>/dev/null || sudo systemctl start postgresql 2>/dev/null || {
+            log_warning "PostgreSQL 서비스 시작 실패. 수동으로 시작을 시도합니다."
+            sudo -u postgres pg_ctl start -D /var/lib/postgresql/*/main/ 2>/dev/null || true
+        }
+        sleep 2
+    fi
+    
+    sudo systemctl enable "$PG_SERVICE" 2>/dev/null || sudo systemctl enable postgresql 2>/dev/null || true
+fi
+
+# PostgreSQL 연결 테스트
+log_info "PostgreSQL 연결 테스트 중..."
+if sudo -u postgres psql -c "SELECT version();" &>/dev/null; then
+    log_success "PostgreSQL 연결 테스트 성공"
+else
+    log_warning "PostgreSQL 연결 테스트 실패. 서비스가 완전히 시작되지 않았을 수 있습니다."
 fi
 
 # Redis 설치

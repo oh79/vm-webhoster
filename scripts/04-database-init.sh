@@ -53,18 +53,77 @@ fi
 # 데이터베이스 연결 테스트 (개선된 버전)
 log_step "데이터베이스 연결 테스트"
 
+# PostgreSQL 서비스 감지 함수
+detect_postgresql_service() {
+    # 가능한 PostgreSQL 서비스 이름들
+    local service_patterns=(
+        "postgresql"
+        "postgresql.service"
+        "postgresql@*-main"
+        "postgresql-*"
+    )
+    
+    for pattern in "${service_patterns[@]}"; do
+        local services=$(systemctl list-units --type=service --all | grep -E "^\\s*${pattern}" | awk '{print $1}' || true)
+        
+        if [ ! -z "$services" ]; then
+            for service in $services; do
+                echo "$service"
+                return 0
+            done
+        fi
+    done
+    
+    # 설치된 서비스들 중에서 찾기
+    local installed_services=$(systemctl list-unit-files | grep postgresql | head -1 | awk '{print $1}' || true)
+    if [ ! -z "$installed_services" ]; then
+        echo "$installed_services"
+        return 0
+    fi
+    
+    echo "postgresql"  # 기본값
+    return 1
+}
+
 # 여러 방법으로 연결 시도
 connection_success=false
-max_attempts=3
+max_attempts=5
 
 for attempt in $(seq 1 $max_attempts); do
     log_info "데이터베이스 연결 시도 $attempt/$max_attempts"
     
-    # 먼저 PostgreSQL 서비스 상태 확인
-    if ! systemctl is-active --quiet postgresql; then
-        log_warning "PostgreSQL 서비스가 실행되지 않음. 재시작 중..."
-        sudo systemctl restart postgresql
+    # PostgreSQL 서비스 상태 확인 및 시작
+    PG_SERVICE=$(detect_postgresql_service)
+    log_info "감지된 PostgreSQL 서비스: $PG_SERVICE"
+    
+    if ! systemctl is-active --quiet "$PG_SERVICE" 2>/dev/null; then
+        log_warning "PostgreSQL 서비스가 실행되지 않음. 시작 중..."
+        
+        # 여러 방법으로 서비스 시작 시도
+        if sudo systemctl start "$PG_SERVICE" 2>/dev/null; then
+            log_info "systemctl로 서비스 시작 성공"
+        elif sudo systemctl start postgresql 2>/dev/null; then
+            log_info "기본 postgresql 서비스 시작 성공"
+        else
+            log_warning "systemctl 시작 실패. 수동 시작 시도 중..."
+            sudo -u postgres pg_ctl start -D /var/lib/postgresql/*/main/ 2>/dev/null || {
+                log_warning "수동 시작도 실패했습니다."
+            }
+        fi
+        
         sleep 5
+    else
+        log_info "PostgreSQL 서비스가 이미 실행 중입니다."
+    fi
+    
+    # PostgreSQL 프로세스 확인
+    if ! pgrep -x "postgres" > /dev/null; then
+        log_warning "PostgreSQL 프로세스를 찾을 수 없습니다."
+        if [ $attempt -lt $max_attempts ]; then
+            log_info "5초 후 재시도..."
+            sleep 5
+            continue
+        fi
     fi
     
     # 방법 1: psycopg2를 사용한 연결 테스트
@@ -94,9 +153,12 @@ except Exception as e:
     fi
     
     # 방법 3: 데이터베이스가 없다면 재생성 시도
-    if [ $attempt -eq 2 ]; then
+    if [ $attempt -eq 3 ]; then
         log_warning "데이터베이스 재생성 시도 중..."
-        sudo -u postgres psql << 'EOF' >/dev/null 2>&1 || true
+        
+        # 먼저 PostgreSQL에 연결 가능한지 확인
+        if sudo -u postgres psql -c "SELECT version();" &>/dev/null; then
+            sudo -u postgres psql << 'EOF' >/dev/null 2>&1 || true
 \set ON_ERROR_STOP off
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'webhoster_db' AND pid <> pg_backend_pid();
 DROP DATABASE IF EXISTS webhoster_db;
@@ -110,21 +172,31 @@ ALTER DATABASE webhoster_db OWNER TO webhoster_user;
 GRANT ALL ON SCHEMA public TO webhoster_user;
 \q
 EOF
-        sleep 3
+            sleep 3
+        else
+            log_warning "PostgreSQL에 postgres 사용자로 연결할 수 없습니다."
+        fi
     fi
     
     if [ $attempt -lt $max_attempts ]; then
-        log_info "3초 후 재시도..."
-        sleep 3
+        log_info "5초 후 재시도..."
+        sleep 5
     fi
 done
 
 if [ "$connection_success" = false ]; then
     log_error "모든 데이터베이스 연결 시도 실패"
-    log_error "수동으로 다음 명령어를 실행해보세요:"
-    log_error "sudo -u postgres createdb webhoster_db"
-    log_error "sudo -u postgres psql -c \"CREATE USER webhoster_user WITH PASSWORD 'webhoster_pass';\""
-    log_error "sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE webhoster_db TO webhoster_user;\""
+    log_error ""
+    log_error "🔧 문제 해결 방법:"
+    log_error "1. PostgreSQL 서비스 상태 확인: systemctl status postgresql*"
+    log_error "2. PostgreSQL 프로세스 확인: ps aux | grep postgres"
+    log_error "3. 수동 데이터베이스 생성:"
+    log_error "   sudo -u postgres createdb webhoster_db"
+    log_error "   sudo -u postgres psql -c \"CREATE USER webhoster_user WITH PASSWORD 'webhoster_pass';\""
+    log_error "   sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE webhoster_db TO webhoster_user;\""
+    log_error "4. PostgreSQL 재설치:"
+    log_error "   sudo apt remove --purge postgresql* -y"
+    log_error "   sudo apt install postgresql postgresql-contrib -y"
     exit 1
 else
     log_success "데이터베이스 연결 확인됨"

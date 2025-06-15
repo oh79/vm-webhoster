@@ -56,21 +56,138 @@ show_progress() {
     printf "] %d%% (%d/%d)${NC}" $percentage $current $total
 }
 
-# 데이터베이스 상태 확인 함수
+# PostgreSQL 서비스 이름 감지 함수 (개선됨)
+detect_postgresql_service() {
+    log_info "PostgreSQL 서비스 이름을 감지하는 중..."
+    
+    # 가능한 PostgreSQL 서비스 이름들
+    local service_patterns=(
+        "postgresql"
+        "postgresql.service"
+        "postgresql@*-main"
+        "postgresql-*"
+    )
+    
+    for pattern in "${service_patterns[@]}"; do
+        # systemctl list-units를 사용하여 실제 서비스 찾기
+        local services=$(systemctl list-units --type=service --all | grep -E "^\\s*${pattern}" | awk '{print $1}' || true)
+        
+        if [ ! -z "$services" ]; then
+            for service in $services; do
+                log_info "PostgreSQL 서비스 발견: $service"
+                echo "$service"
+                return 0
+            done
+        fi
+    done
+    
+    # 직접 설치된 서비스들 중에서 찾기
+    local installed_services=$(systemctl list-unit-files | grep postgresql | head -1 | awk '{print $1}' || true)
+    if [ ! -z "$installed_services" ]; then
+        log_info "설치된 PostgreSQL 서비스 발견: $installed_services"
+        echo "$installed_services"
+        return 0
+    fi
+    
+    log_warning "PostgreSQL 서비스를 찾을 수 없습니다."
+    return 1
+}
+
+# PostgreSQL 설치 상태 확인 및 설치 함수
+ensure_postgresql_installed() {
+    log_info "PostgreSQL 설치 상태 확인 중..."
+    
+    # PostgreSQL 명령어 확인
+    if ! command -v psql &> /dev/null; then
+        log_warning "PostgreSQL이 설치되지 않았습니다. 설치를 시작합니다..."
+        
+        # 패키지 목록 업데이트
+        sudo apt update
+        
+        # PostgreSQL 설치
+        sudo apt install -y postgresql postgresql-contrib postgresql-client
+        
+        # 설치 완료 대기
+        sleep 5
+        
+        if command -v psql &> /dev/null; then
+            log_success "PostgreSQL 설치 완료"
+        else
+            log_error "PostgreSQL 설치에 실패했습니다."
+            return 1
+        fi
+    else
+        log_info "PostgreSQL이 이미 설치되어 있습니다."
+    fi
+    
+    return 0
+}
+
+# 데이터베이스 상태 확인 함수 (완전히 개선됨)
 check_database_ready() {
-    local max_attempts=5
+    local max_attempts=8
     local attempt=1
     
     log_info "데이터베이스 연결 상태 확인 중..."
     
+    # PostgreSQL 설치 확인
+    if ! ensure_postgresql_installed; then
+        log_error "PostgreSQL 설치 실패"
+        return 1
+    fi
+    
     while [ $attempt -le $max_attempts ]; do
         log_info "데이터베이스 연결 시도 $attempt/$max_attempts"
         
-        # PostgreSQL 서비스 상태 확인
-        if ! systemctl is-active --quiet postgresql; then
-            log_warning "PostgreSQL 서비스가 실행되지 않음. 시작 중..."
-            sudo systemctl start postgresql
-            sleep 3
+        # PostgreSQL 서비스 이름 감지
+        local pg_service=$(detect_postgresql_service)
+        
+        if [ ! -z "$pg_service" ]; then
+            # PostgreSQL 서비스 상태 확인 및 시작
+            if ! systemctl is-active --quiet "$pg_service"; then
+                log_warning "PostgreSQL 서비스($pg_service)가 실행되지 않음. 시작 중..."
+                
+                # 서비스 활성화 (필요한 경우)
+                sudo systemctl enable "$pg_service" 2>/dev/null || true
+                
+                # 서비스 시작
+                if sudo systemctl start "$pg_service"; then
+                    log_success "PostgreSQL 서비스 시작 완료"
+                    sleep 3  # 서비스 시작 대기
+                else
+                    log_warning "systemctl로 서비스 시작 실패. 직접 시작을 시도합니다."
+                    
+                    # pg_ctl을 사용한 직접 시작 시도
+                    sudo -u postgres pg_ctl start -D /var/lib/postgresql/*/main/ 2>/dev/null || {
+                        log_warning "직접 시작도 실패했습니다."
+                    }
+                    sleep 2
+                fi
+            else
+                log_info "PostgreSQL 서비스가 이미 실행 중입니다."
+            fi
+        else
+            log_warning "PostgreSQL 서비스를 찾을 수 없습니다. 수동으로 시작을 시도합니다."
+            
+            # 수동으로 PostgreSQL 시작 시도
+            sudo -u postgres pg_ctl start -D /var/lib/postgresql/*/main/ 2>/dev/null || {
+                log_warning "수동 시작도 실패했습니다."
+            }
+            sleep 2
+        fi
+        
+        # PostgreSQL 프로세스 확인
+        if pgrep -x "postgres" > /dev/null; then
+            log_info "PostgreSQL 프로세스가 실행 중입니다."
+        else
+            log_warning "PostgreSQL 프로세스를 찾을 수 없습니다."
+            
+            if [ $attempt -lt $max_attempts ]; then
+                log_info "5초 후 재시도..."
+                sleep 5
+                attempt=$((attempt + 1))
+                continue
+            fi
         fi
         
         # 데이터베이스 연결 테스트
@@ -81,7 +198,8 @@ check_database_ready() {
             log_warning "데이터베이스가 존재하지 않습니다. 생성 시도 중..."
             
             # 데이터베이스 및 사용자 생성
-            sudo -u postgres psql << 'EOF' 2>/dev/null || true
+            if sudo -u postgres psql -c "SELECT 1;" &>/dev/null; then
+                sudo -u postgres psql << 'EOF' 2>/dev/null || true
 \set ON_ERROR_STOP off
 DROP DATABASE IF EXISTS webhoster_db;
 DROP USER IF EXISTS webhoster_user;
@@ -92,24 +210,32 @@ ALTER USER webhoster_user CREATEDB;
 ALTER DATABASE webhoster_db OWNER TO webhoster_user;
 \q
 EOF
-            
-            sleep 2
-            
-            # 재확인
-            if sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw webhoster_db; then
-                log_success "데이터베이스 생성 및 연결 확인됨"
-                return 0
+                
+                sleep 2
+                
+                # 재확인
+                if sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw webhoster_db; then
+                    log_success "데이터베이스 생성 및 연결 확인됨"
+                    return 0
+                fi
+            else
+                log_warning "PostgreSQL에 연결할 수 없습니다. 서비스 상태를 확인하세요."
             fi
         fi
         
         attempt=$((attempt + 1))
         if [ $attempt -le $max_attempts ]; then
-            log_info "3초 후 재시도..."
-            sleep 3
+            log_info "5초 후 재시도..."
+            sleep 5
         fi
     done
     
-    log_error "데이터베이스 연결 실패. 수동 확인이 필요합니다."
+    log_error "데이터베이스 연결 실패. 다음을 확인하세요:"
+    log_error "1. PostgreSQL 설치 상태: dpkg -l | grep postgresql"
+    log_error "2. PostgreSQL 서비스 상태: systemctl status postgresql*"
+    log_error "3. PostgreSQL 프로세스: ps aux | grep postgres"
+    log_error "4. 수동 설치 시도: sudo apt install -y postgresql postgresql-contrib"
+    
     return 1
 }
 
