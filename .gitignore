@@ -79,8 +79,7 @@ venv.bak/
 webhoster_dev.db
 
 # Logs
-*.log
-logs/
+logs/*
 backend/logs/
 frontend/logs/
 

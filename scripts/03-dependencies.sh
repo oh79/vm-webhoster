@@ -51,6 +51,24 @@ pip install --upgrade pip
 log_info "Python 의존성 설치 중... (시간이 걸릴 수 있습니다)"
 pip install -r requirements.txt
 
+# 중요한 모듈들 설치 검증
+log_info "중요 모듈 설치 검증 중..."
+python -c "import requests; print('✅ requests 모듈:', requests.__version__)" 2>/dev/null || {
+    log_warning "requests 모듈이 설치되지 않았습니다. 개별 설치 시도..."
+    pip install requests
+    python -c "import requests; print('✅ requests 모듈 설치 완료:', requests.__version__)"
+}
+
+python -c "import jinja2; print('✅ jinja2 모듈:', jinja2.__version__)" 2>/dev/null || {
+    log_error "jinja2 모듈이 설치되지 않았습니다!"
+    exit 1
+}
+
+python -c "import fastapi; print('✅ fastapi 모듈:', fastapi.__version__)" 2>/dev/null || {
+    log_error "fastapi 모듈이 설치되지 않았습니다!"
+    exit 1
+}
+
 log_success "백엔드 의존성 설치 완료"
 
 # 버전 확인

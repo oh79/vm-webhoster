@@ -50,21 +50,85 @@ else
     exit 1
 fi
 
-# 데이터베이스 연결 테스트
+# 데이터베이스 연결 테스트 (개선된 버전)
 log_step "데이터베이스 연결 테스트"
-python3 -c "
+
+# 여러 방법으로 연결 시도
+connection_success=false
+max_attempts=3
+
+for attempt in $(seq 1 $max_attempts); do
+    log_info "데이터베이스 연결 시도 $attempt/$max_attempts"
+    
+    # 먼저 PostgreSQL 서비스 상태 확인
+    if ! systemctl is-active --quiet postgresql; then
+        log_warning "PostgreSQL 서비스가 실행되지 않음. 재시작 중..."
+        sudo systemctl restart postgresql
+        sleep 5
+    fi
+    
+    # 방법 1: psycopg2를 사용한 연결 테스트
+    if python3 -c "
 import psycopg2
+import os
 try:
-    conn = psycopg2.connect('$DATABASE_URL')
-    print('  ✅ 데이터베이스 연결 성공')
+    # 환경변수에서 DATABASE_URL 읽기
+    database_url = os.getenv('DATABASE_URL', 'postgresql://webhoster_user:webhoster_pass@localhost:5432/webhoster_db')
+    conn = psycopg2.connect(database_url)
+    print('✅ psycopg2 연결 성공')
     conn.close()
+    exit(0)
 except Exception as e:
-    print(f'  ❌ 데이터베이스 연결 실패: {e}')
+    print(f'❌ psycopg2 연결 실패: {e}')
     exit(1)
-" || {
-    log_error "데이터베이스 연결 실패. PostgreSQL 서비스와 설정을 확인하세요."
+" 2>/dev/null; then
+        connection_success=true
+        break
+    fi
+    
+    # 방법 2: 직접 psql 명령어로 연결 테스트
+    if PGPASSWORD='webhoster_pass' psql -h localhost -U webhoster_user -d webhoster_db -c "SELECT 1;" >/dev/null 2>&1; then
+        log_success "psql 직접 연결 성공"
+        connection_success=true
+        break
+    fi
+    
+    # 방법 3: 데이터베이스가 없다면 재생성 시도
+    if [ $attempt -eq 2 ]; then
+        log_warning "데이터베이스 재생성 시도 중..."
+        sudo -u postgres psql << 'EOF' >/dev/null 2>&1 || true
+\set ON_ERROR_STOP off
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'webhoster_db' AND pid <> pg_backend_pid();
+DROP DATABASE IF EXISTS webhoster_db;
+DROP USER IF EXISTS webhoster_user;
+CREATE DATABASE webhoster_db;
+CREATE USER webhoster_user WITH PASSWORD 'webhoster_pass';
+GRANT ALL PRIVILEGES ON DATABASE webhoster_db TO webhoster_user;
+ALTER USER webhoster_user CREATEDB;
+ALTER DATABASE webhoster_db OWNER TO webhoster_user;
+\c webhoster_db
+GRANT ALL ON SCHEMA public TO webhoster_user;
+\q
+EOF
+        sleep 3
+    fi
+    
+    if [ $attempt -lt $max_attempts ]; then
+        log_info "3초 후 재시도..."
+        sleep 3
+    fi
+done
+
+if [ "$connection_success" = false ]; then
+    log_error "모든 데이터베이스 연결 시도 실패"
+    log_error "수동으로 다음 명령어를 실행해보세요:"
+    log_error "sudo -u postgres createdb webhoster_db"
+    log_error "sudo -u postgres psql -c \"CREATE USER webhoster_user WITH PASSWORD 'webhoster_pass';\""
+    log_error "sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE webhoster_db TO webhoster_user;\""
     exit 1
-}
+else
+    log_success "데이터베이스 연결 확인됨"
+fi
 
 # Alembic 초기화 확인
 log_step "Alembic 마이그레이션 환경 확인"

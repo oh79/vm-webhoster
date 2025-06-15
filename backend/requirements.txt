@@ -25,6 +25,7 @@ cryptography==41.0.7
 # 유틸리티
 aiofiles==23.2.1
 httpx==0.25.2
+requests==2.32.4
 python-dotenv==1.0.0
 
 # 템플릿 엔진 (Nginx 설정 생성용)
